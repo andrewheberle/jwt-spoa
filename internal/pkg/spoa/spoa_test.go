@@ -16,8 +16,8 @@ func Test_toValue(t *testing.T) {
 	}{
 		{
 			name: "string value",
-			raw:  json.RawMessage(`"Andrew"`),
-			want: "Andrew",
+			raw:  json.RawMessage(`"thisisastring"`),
+			want: "thisisastring",
 		},
 		{
 			name: "empty string value",
