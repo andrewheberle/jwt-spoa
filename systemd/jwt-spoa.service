@@ -1,0 +1,12 @@
+[Unit]
+Description=JWT SPOA Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/jwt-spoa
+ExecStart=/usr/bin/jwt-spoa
+DynamicUser=yes
+
+[Install]
+WantedBy=default.target
