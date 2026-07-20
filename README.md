@@ -53,12 +53,12 @@ spoe-agent jwt
 	# This must match the backend name in the main config
     use-backend be_spoe
 
-spoe-message jwt-verifiy
+spoe-message jwt-verify
 	# Pass the JWT to the SPOA
     args jwt=var(txn.jwt)
 
-spoe-group verifiy
-    messages jwt-verifiy
+spoe-group verify
+    messages jwt-verify
 ```
 
 ### Returned Variables
