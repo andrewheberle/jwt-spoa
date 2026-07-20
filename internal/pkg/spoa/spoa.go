@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	MessageName = "jwt-verifiy"
+	MessageName = "jwt-verify"
 )
 
 type Server struct {
