@@ -176,12 +176,12 @@ func (s *Server) handler(req *request.Request) {
 	attrs := make([]slog.Attr, 0)
 	for _, claim := range s.claims {
 		if v, ok := all[claim]; ok {
-			attrs = append(attrs, slog.Any(claim, v))
 			value, err := toValue(v)
 			if err != nil {
 				logger.Warn("problem converting claim value to a supported type", "claim", claim, "error", err)
 				continue
 			}
+			attrs = append(attrs, slog.Any(claim, value))
 			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), value)
 		} else {
 			logger.Warn("an expected claim was missing", "claim", claim)

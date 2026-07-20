@@ -15,19 +15,23 @@ Add the config to you HAProxy configuration:
 frontend fe_http
 	mode http
 
-	acl jwt_valid var(txn.jwt_valid) -m bool true
+	# set transaction level variable for SPOE config
+	http-request set-var(txn.jwt) req.hdr("your-jwt-header")
 
-	http-request set-var(txn.jwt) http_auth_bearer()
-
+	# send request to SPOE
 	filter spoe engine jwt config /etc/haproxy/spoe.cfg
-
 	http-request send-spoe-group jwt verify
+
+	# deny access if JWT was not valid
+	acl jwt_valid var(txn.jwt.jwt_valid) -m bool true
 	http-request reject unless jwt_valid
 
-	# the rest of your frontend config is unchanged
+	# add further request handling based on claims
 
 # This is the backend for communication with the agent
 backend be_spoe
+    mode tcp
+
 	timeout connect 5s
 	timeout server  5m
 
@@ -46,14 +50,18 @@ spoe-agent jwt
     timeout processing 100ms
     timeout idle       3m
 
-	option var-prefix jwt
+    option var-prefix jwt
 
     groups verify
 
-	# This must match the backend name in the main config
     use-backend be_spoe
 
 spoe-message jwt-verify
+    args jwt=var(txn.jwt)
+
+spoe-group verify
+    messages jwt-verify
+
 	# Pass the JWT to the SPOA
     args jwt=var(txn.jwt)
 
