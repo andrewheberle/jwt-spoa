@@ -177,7 +177,12 @@ func (s *Server) handler(req *request.Request) {
 	for _, claim := range s.claims {
 		if v, ok := all[claim]; ok {
 			attrs = append(attrs, slog.Any(claim, v))
-			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), v)
+			value, err := toValue(v)
+			if err != nil {
+				logger.Warn("problem converting value to a supported type", "claim", claim, "error", err)
+				continue
+			}
+			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), value)
 		} else {
 			logger.Warn("an expected claim was missing", "claim", claim)
 		}
@@ -191,4 +196,35 @@ func (s *Server) handler(req *request.Request) {
 
 func (s *Server) Errorf(format string, args ...any) {
 	s.logger.Error(fmt.Sprintf(format, args...))
+}
+
+func toValue(raw json.RawMessage) (any, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+
+	switch t := v.(type) {
+	case bool:
+		return t, nil
+	case string:
+		return t, nil
+	case float64:
+		// JSON numbers decode as float64; convert to int if it's whole.
+		if t == float64(int64(t)) {
+			return int(t), nil
+		}
+		// non-whole number — Foo can't take a float, so decide:
+		// here we fall back to a string representation.
+		return fmt.Sprintf("%v", t), nil
+	case nil:
+		return "", nil // or however you want to represent null
+	default:
+		// array or object - re-marshal to a compact JSON string
+		b, err := json.Marshal(t)
+		if err != nil {
+			return nil, err
+		}
+		return string(b), nil
+	}
 }
