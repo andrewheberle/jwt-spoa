@@ -179,7 +179,7 @@ func (s *Server) handler(req *request.Request) {
 			attrs = append(attrs, slog.Any(claim, v))
 			value, err := toValue(v)
 			if err != nil {
-				logger.Warn("problem converting value to a supported type", "claim", claim, "error", err)
+				logger.Warn("problem converting claim value to a supported type", "claim", claim, "error", err)
 				continue
 			}
 			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), value)
