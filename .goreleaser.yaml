@@ -6,7 +6,7 @@ before:
 
 builds:
   - id: default
-    binary: geoip-spoa
+    binary: jwt-spoa
     env:
       - CGO_ENABLED=0
     flags:
@@ -16,7 +16,7 @@ builds:
       - arm64
     goos:
       - linux
-    main: ./cmd/geoip-spoa
+    main: ./cmd/jwt-spoa
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X main.Version={{ .Version }}
@@ -72,11 +72,11 @@ sboms:
 nfpms:
   - ids:
       - default
-    homepage: https://github.com/andrewheberle/geoip-spoa
+    homepage: https://github.com/andrewheberle/jwt-spoa
     maintainer: Andrew Heberle <andrew.heberle@gmail.com>
     description: |-
-      A Stream Processing Offload Agent (SPOE) that handles GeoIP lookups
-      for HAProxy.
+      A Stream Processing Offload Agent (SPOE) that handles JWT verification
+      and claim extraction for HAProxy.
     license: Apache 2.0
     formats:
       - deb

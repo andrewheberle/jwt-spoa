@@ -1,5 +1,7 @@
 # jwt-spoa
 
+[![codecov](https://codecov.io/gh/andrewheberle/jwt-spoa/graph/badge.svg?token=XXsp17Pn5L)](https://codecov.io/gh/andrewheberle/jwt-spoa)
+
 This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 verify an incoming JWT and return the claims. It supports verifying the
 JWT against a JWKS URL only at this time.
