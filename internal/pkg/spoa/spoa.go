@@ -156,7 +156,7 @@ func (s *Server) handler(req *request.Request) {
 	}
 
 	// verify JWT
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 	parsed, err := s.verifier.Verify(ctx, signed)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *Server) handler(req *request.Request) {
 
 	// extract wanted claims and set variables
 	var all map[string]json.RawMessage
-	if err := parsed.Claims(all); err != nil {
+	if err := parsed.Claims(&all); err != nil {
 		status = "error"
 		s.logger.Error("could not parse JWT", "error", err)
 		return
