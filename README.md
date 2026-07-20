@@ -15,14 +15,14 @@ Add the config to you HAProxy configuration:
 frontend fe_http
 	mode http
 
-	acl allowed_asn var(txn.jwt_valid) -m bool
+	acl jwt_valid var(txn.jwt_valid) -m bool true
 
 	http-request set-var(txn.jwt) http_auth_bearer()
 
 	filter spoe engine jwt config /etc/haproxy/spoe.cfg
 
 	http-request send-spoe-group jwt verify
-	http-request reject unless allowed_asn
+	http-request reject unless jwt_valid
 
 	# the rest of your frontend config is unchanged
 
