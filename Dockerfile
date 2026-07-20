@@ -1,0 +1,6 @@
+FROM gcr.io/distroless/base-debian13:nonroot@sha256:97b9d04bed1c754b756c3c4b6a04915c22fb0b5d96a59944eb3bf78c26e6e157
+ARG TARGETPLATFORM
+ENV JWT_LISTEN=":3000" JWT_METRICS_LISTEN=":8080"
+EXPOSE 3000 8080
+ENTRYPOINT [ "/usr/bin/jwt-spoa" ]
+COPY $TARGETPLATFORM/jwt-spoa /usr/bin/
