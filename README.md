@@ -1,5 +1,7 @@
 # jwt-spoa
 
+[![codecov](https://codecov.io/gh/andrewheberle/jwt-spoa/graph/badge.svg?token=XXsp17Pn5L)](https://codecov.io/gh/andrewheberle/jwt-spoa)
+
 This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 verify an incoming JWT and return the claims. It supports verifying the
 JWT against a JWKS URL only at this time.
@@ -13,14 +15,14 @@ Add the config to you HAProxy configuration:
 frontend fe_http
 	mode http
 
-	acl allowed_asn var(txn.jwt_valid) -m bool
+	acl jwt_valid var(txn.jwt_valid) -m bool true
 
 	http-request set-var(txn.jwt) http_auth_bearer()
 
 	filter spoe engine jwt config /etc/haproxy/spoe.cfg
 
 	http-request send-spoe-group jwt verify
-	http-request reject unless allowed_asn
+	http-request reject unless jwt_valid
 
 	# the rest of your frontend config is unchanged
 
@@ -67,7 +69,7 @@ The following variables are returned by the agent to HAProxy:
 * txn.PREFIX.claims.CLAIM (string/integer) - Claims in the JWT
 
 The claims returned in `txn.PREFIX.claims.CLAIM` depend on what is provided to
-the SPO configuration. Claims that are not found are omitted but a warning is
+the SPOA configuration. Claims that are not found are omitted but a warning is
 logged.
 
 ## Configuratuon
@@ -93,7 +95,7 @@ The following command line options are supported:
 | config         | `string`   |                                     | Path to YAML configuration file                    |
 | debug          | `boolean`  | `false`                             | Enable debug logging                               |
 | jwt.aud        | `string`   |                                     | Audience (aud) expected for JWT verification       |
-| jwt.claims     | `[]string` | `["email"]`                         | Additional claims to extract from JWT's            |
+| jwt.claims     | `[]string` | `["email"]`                         | Claims to extract from JWT's                       |
 | jwt.iss        | `string`   |                                     | Issuer (iss) claim of the JWT's (required)         |
 | jwt.jwks       | `string`   | `ISSUER/.well-known/jwks.json`      | JWKS URL (required)                                |
 | jwt.methods    | `[]string` | `["RS256"]`                         | Methods/algorithms to use to verify JWT's          |
