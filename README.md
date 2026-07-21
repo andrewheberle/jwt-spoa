@@ -98,15 +98,15 @@ this approach has some limitations as follows:
 2. The certificates used to verify the JWT must be fetched and updated via
    HAProxy's management API or available on disk, so external scripts/tooling
    is still required
-3. Only the signature of the JWT is verfified by the `jwt_verify` fetch method
+3. Only the signature of the JWT is verified by the `jwt_verify` fetch method
 4. Verification of the issuer, audience, algorithm and expiry must be
-   performed via additional ACLs and fetches
+   performed via additional ACLs/fetches
 5. Claim extraction is via additional fetches
 
-As an expample, the following two front end configurations are functionally
-equivalent, however the built-in JWT handling requires the certificate used to
-verify the JWT to have been downloaded and available in PEM format when HAProxy
-was started/reloaded:
+As an example, the following two front end configurations are functionally
+equivalent, however the built-in JWT handling requires significantly more
+configuration and the certificate used to verify the JWT to have been
+downloaded and available in PEM format when HAProxy was started/reloaded:
 
 ```
 frontend fe_builtin_jwt
@@ -185,7 +185,7 @@ The following command line options are supported:
 
 ### Environment
 
-All of the above command-line options can be provided as environemnt
+All of the above command-line options can be provided as environment
 variables as follows:
 
 ```sh
