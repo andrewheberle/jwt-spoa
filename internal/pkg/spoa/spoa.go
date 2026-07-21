@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -24,10 +25,11 @@ const (
 )
 
 type Server struct {
-	addr     string
-	logger   *slog.Logger
-	registry *prometheus.Registry
-	claims   []string
+	addr           string
+	logger         *slog.Logger
+	registry       *prometheus.Registry
+	claims         []string
+	requiredClaims []string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -45,14 +47,15 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		addr:     addr,
-		logger:   slog.New(slog.DiscardHandler),
-		registry: prometheus.NewRegistry(),
-		claims:   make([]string, 0),
-		ctx:      ctx,
-		cancel:   cancel,
-		keyset:   oidc.NewRemoteKeySet(ctx, jwks),
-		config:   &oidc.Config{},
+		addr:           addr,
+		logger:         slog.New(slog.DiscardHandler),
+		registry:       prometheus.NewRegistry(),
+		claims:         make([]string, 0),
+		requiredClaims: make([]string, 0),
+		ctx:            ctx,
+		cancel:         cancel,
+		keyset:         oidc.NewRemoteKeySet(ctx, jwks),
+		config:         &oidc.Config{},
 	}
 
 	for _, o := range opts {
@@ -155,22 +158,27 @@ func (s *Server) handler(req *request.Request) {
 		return
 	}
 
+	// ensure we always return jwt_valid as true/false from here onwards
+	jwtValid := false
+	defer func() {
+		req.Actions.SetVar(action.ScopeTransaction, "jwt_valid", jwtValid)
+	}()
+
 	// verify JWT
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 	parsed, err := s.verifier.Verify(ctx, signed)
 	if err != nil {
 		status = "error"
-		s.logger.Error("could not verify JWT", "error", err)
+		logger.Error("could not verify JWT", "error", err)
 		return
 	}
-	req.Actions.SetVar(action.ScopeTransaction, "jwt_valid", true)
 
 	// extract wanted claims and set variables
 	var all map[string]json.RawMessage
 	if err := parsed.Claims(&all); err != nil {
 		status = "error"
-		s.logger.Error("could not parse JWT", "error", err)
+		logger.Error("could not parse JWT", "error", err)
 		return
 	}
 	attrs := make([]slog.Attr, 0)
@@ -184,12 +192,20 @@ func (s *Server) handler(req *request.Request) {
 			attrs = append(attrs, slog.Any(claim, value))
 			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), value)
 		} else {
+			// check if missing claim was required
+			if slices.Contains(s.requiredClaims, claim) {
+				logger.Error("a required claim was missing", "claim", claim)
+				return
+			}
 			logger.Warn("an expected claim was missing", "claim", claim)
 		}
 	}
 
+	// mark JWT as valid
+	jwtValid = true
+
 	logger.Debug("handled request",
-		"jwt_valid", true,
+		"jwt_valid", jwtValid,
 		slog.GroupAttrs("claims", attrs...),
 	)
 }
