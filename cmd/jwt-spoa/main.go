@@ -7,16 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/andrewheberle/jwt-spoa/internal/pkg/config"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/logger"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/spoa"
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/env/v2"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/providers/posflag"
-	"github.com/knadh/koanf/v2"
 	"github.com/oklog/run"
 	"github.com/spf13/pflag"
 )
@@ -36,6 +31,7 @@ func main() {
 	f.String("jwt.iss", "", "Issuer (iss) claim of the JWT's (required)")
 	f.String("jwt.jwks", "", "URL of JSON Web Key Set (JWKS) used to verify the JWT's (required)")
 	f.StringSlice("jwt.claims", []string{"email"}, "Claims to extract (if present) from JWT's")
+	f.StringSlice("jwt.requiredclaims", []string{}, "Required claims to extract (if present) from JWT's")
 	f.Bool("debug", false, "Enable debug logging")
 	f.Bool("version", false, "Show version and exit")
 	f.Var(lt, "logger.type", "Logger type (auto, discard, json, systemd or text)")
@@ -52,41 +48,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	k := koanf.New(".")
-
-	// load any config file
-	if config, err := f.GetString("config"); err != nil {
-		fmt.Fprintf(os.Stderr, "error getting flag value: %s\n", err)
-		os.Exit(1)
-	} else if config != "" {
-		if err := k.Load(file.Provider(config), yaml.Parser()); err != nil {
-			fmt.Fprintf(os.Stderr, "error loading configuration: %s\n", err)
-			os.Exit(1)
-		}
-	}
-
-	// Load env vars
-	if err := k.Load(env.Provider(".", env.Opt{
-		Prefix: "JWT_",
-		TransformFunc: func(k, v string) (string, any) {
-			// Transform the key.
-			k = strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(k, "JWT_")), "_", ".")
-
-			// Transform values with commas into slices
-			if strings.Contains(v, ",") {
-				return k, strings.Split(v, ",")
-			}
-
-			return k, v
-		},
-	}), nil); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading env vars: %s\n", err)
-		os.Exit(1)
-	}
-
-	// Load command line options
-	if err := k.Load(posflag.Provider(f, ".", k), nil); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading command line: %s\n", err)
+	// load config
+	k, err := config.LoadConfig(f, "JWT_")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error setting up config: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -102,6 +67,7 @@ func main() {
 		logLevel.Set(slog.LevelDebug)
 	}
 
+	// set up service
 	listenString := k.String("listen")
 	iss := k.String("jwt.iss")
 	if iss == "" {
@@ -126,6 +92,7 @@ func main() {
 	opts := []spoa.ServerOption{
 		spoa.WithLogger(logger),
 		spoa.WithClaims(k.Strings("jwt.claims")),
+		spoa.WithRequiredClaims(k.Strings("jwt.requiredclaims")),
 	}
 	if aud := k.String("jwt.aud"); aud != "" {
 		opts = append(opts, spoa.WithAudience(aud))
