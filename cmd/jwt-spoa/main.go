@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// load config
-	k, err := config.LoadConfig(f, "JWT_")
+	k, err := config.LoadConfig(f, config.WithEnvPrefix("JWT"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting up config: %s\n", err)
 		os.Exit(1)
