@@ -16,7 +16,16 @@ const (
 	DefaultConfigKeyName = "config"
 )
 
-// Returns [koanf.Koanf] by reading a YAML based configuration file,
+type Config interface {
+	String(key string) string
+	Strings(key string) []string
+	Bool(key string) bool
+	Bools(key string) []bool
+	Int(key string) int
+	Ints(key string) []int
+}
+
+// Returns a [Config] by reading a YAML based configuration file,
 // environment variables and command line flags.
 //
 // The configuration file is loaded based on the [WithConfigKeyName]
@@ -25,8 +34,8 @@ const (
 //
 // If [WithEnvPrefix] is provided then enviroment variables prefixed with
 // "PREFIX_" will be included in the configuration.
-func LoadConfig(f *pflag.FlagSet, opts ...ConfigOption) (*koanf.Koanf, error) {
-	config := &Config{
+func LoadConfig(f *pflag.FlagSet, opts ...ConfigOption) (Config, error) {
+	config := &ConfigSettings{
 		key: DefaultConfigKeyName,
 	}
 
@@ -76,31 +85,31 @@ func LoadConfig(f *pflag.FlagSet, opts ...ConfigOption) (*koanf.Koanf, error) {
 	return k, nil
 }
 
-type Config struct {
+type ConfigSettings struct {
 	envprefix string
 	key       string
 	disabled  bool
 }
 
-type ConfigOption func(*Config)
+type ConfigOption func(*ConfigSettings)
 
 // Sets a specific key name to lookup the configuration file from
 func WithConfigKeyName(key string) ConfigOption {
-	return func(c *Config) {
+	return func(c *ConfigSettings) {
 		c.key = key
 	}
 }
 
 // Explicitly disable configuration file loading
 func WithoutConfigurationFile() ConfigOption {
-	return func(c *Config) {
+	return func(c *ConfigSettings) {
 		c.disabled = true
 	}
 }
 
 // Set the prefix for environment variable loading
 func WithEnvPrefix(prefix string) ConfigOption {
-	return func(c *Config) {
+	return func(c *ConfigSettings) {
 		// trim any undescore as we add it back later
 		c.envprefix = strings.TrimSuffix(prefix, "_")
 	}
