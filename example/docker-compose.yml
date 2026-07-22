@@ -1,0 +1,23 @@
+services:
+  haproxy:
+    container_name: haproxy
+    image: haproxy:lts
+    command: [ "-f", "/config/haproxy.cfg" ]
+    ports:
+      - 8080:8080
+      - 8081:8081
+    volumes:
+      - ./haproxy.cfg:/config/haproxy.cfg:ro
+      - ./spoe.cfg:/config/spoe.cfg:ro
+      - ./key.pem:/keys/key.pem:ro
+    environment:
+      - JWT_AUD=${JWT_AUD:?error}
+      - JWT_ISS=${JWT_ISS:?error}
+  spoa:
+    container_name: spoa
+    image: ghcr.io/andrewheberle/jwt-spoa:v0.3.1
+    environment:
+      - JWT_JWT_AUD=${JWT_AUD:?error}
+      - JWT_JWT_ISS=${JWT_ISS:?error}
+      - JWT_JWT_JWKS=${JWKS_URL:?error}
+      - JWT_JWT_REQUIREDCLAIMS=email

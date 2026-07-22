@@ -88,7 +88,7 @@ stopped and `txn.PREFIX.jwt_valid` is returned as `false`, so in this case
 there may or may not be some claims returned depending on the order in which
 they were processed.
 
-### Why Not Use Native JWT Fetches?
+### What About Native JWT Fetches?
 
 HAProxy has supported verifying and parsing JWT's since v2.5 onwards which
 requires no external service as is the case with this solution, however
@@ -110,33 +110,36 @@ downloaded and available in PEM format when HAProxy was started/reloaded:
 
 ```
 frontend fe_builtin_jwt
-	# extract JWT from request
+	# extract JWT from request (reject if not found)
+	http-request reject unless { http_auth_bearer -m found }
 	http-request set-var(txn.jwt) http_auth_bearer
 	# extract and check algorithm
 	http-request set-var(txn.jwt_alg) var(txn.jwt),jwt_header_query('$.alg')
 	http-request deny unless { var(txn.jwt_alg) -m str "RS256" }
 	# extract and check issuer
-	http-request set-var(txn.jwt_iss) var(txn.jwt),jwt_header_query('$.iss')
+	http-request set-var(txn.jwt_iss) var(txn.jwt),jwt_payload_query('$.iss')
 	http-request deny unless { var(txn.jwt_iss) -m str "https://idp.example.com" }
 	# extract and check audience
-	http-request set-var(txn.jwt_aud) var(txn.jwt),jwt_header_query('$.aud')
-	http-request deny unless { var(txn.jwt_aud) -m str "allowed-jwd-audience" }
+	http-request set-var(txn.jwt_aud) var(txn.jwt),jwt_payload_query('$.aud')
+    http-request deny unless { var(txn.jwt_aud) -m reg \[\"allowed-jwd-audience\"\] }
 	# extract and check expiry
 	http-request set-var(txn.jwt_exp) var(txn.jwt),jwt_payload_query('$.exp','int')
   	http-request set-var(txn.now) date
-	http-request deny unless { var(txn.jwt_exp),sub(txn.now) lt 0 }
+	http-request deny if { var(txn.jwt_exp),sub(txn.now) lt 0 }
 	# verify JWT signature
 	http-request deny unless { var(txn.jwt),jwt_verify(txn.jwt_alg,"/path/to/pubkey.pem") 1 }
 	# deny unless email claim is found
 	http-request deny unless { var(txn.jwt),jwt_payload_query('$.email') -m found }
+	http-request set-var(txn.jwt.claims.email) var(txn.jwt),jwt_payload_query('$.email')
 
 frontend fe_spoa_jwt
-	# extract JWT from request
+	# extract JWT from request (reject if not found)
+	http-request reject unless { http_auth_bearer -m found }
 	http-request set-var(txn.jwt) http_auth_bearer
 	filter spoe engine jwt config /path/to/spoe.cfg
 	http-request send-spoe-group jwt verify
 	# check that JWT was valid (checks aud, iss, exp, signature and that an email claim exists)
-	http-request deny unless { var(txn.jwt.jwt_valid) -m bool true }
+	http-request deny unless { var(txn.jwt.jwt_valid) -m bool 1 }
 ```
 
 The config used for the SPOA for the above would be as follows:
@@ -149,6 +152,18 @@ jwt:
   requiredclaims: ["email"]
   methods: ["RS256"] # default
 ```
+
+An important thing to note however is that despite the extra configuration,
+using the built-in JWT handling in HAProxy is much faster due to the lack of
+network overheads to handle the request via the SPOA so it depends on your
+workload.
+
+In basic tests of a thousand requests to both options from `localhost` gave
+results approximately 50% slower using this SPOA for JWT verification, however
+it should be noted that this meant P99 response times of 0.0134s for built-in
+JWT handling compared to P99 response times of 0.0382s using this SPOA, so
+depending on your workload and request volumes this may or may not be a
+problem.
 
 ## Configuration
 
