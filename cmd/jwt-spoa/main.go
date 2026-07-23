@@ -57,8 +57,7 @@ func main() {
 
 	// set up logger
 	logLevel := new(slog.LevelVar)
-	ltString := k.String("logger.type")
-	logger, err := slogger.NewLogger(logLevel, slogger.WithLoggerType(slogger.LoggerType(ltString)))
+	logger, err := slogger.NewLogger(logLevel, lt.LoggerTypeOption())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting up logger: %s\n", err)
 		os.Exit(1)
