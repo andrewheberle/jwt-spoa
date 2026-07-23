@@ -1,3 +1,5 @@
+github.com/andrewheberle/slogger v0.1.1 h1:bHwHraNzjjfRJkEwBchKJ5rRswHtz5NvB5LGOmCbt1Y=
+github.com/andrewheberle/slogger v0.1.1/go.mod h1:mg0MGoA3as6po5aoQA6WxyAOGs/snPhLvuOKliGoiyM=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

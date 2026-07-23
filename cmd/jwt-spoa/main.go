@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/config"
-	"github.com/andrewheberle/jwt-spoa/internal/pkg/logger"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/spoa"
+	"github.com/andrewheberle/slogger"
 	"github.com/oklog/run"
 	"github.com/spf13/pflag"
 )
@@ -19,7 +19,7 @@ import (
 var Version = "dev"
 
 func main() {
-	lt := new(logger.LoggerTypeVar)
+	lt := new(slogger.LoggerTypeVar)
 
 	f := pflag.NewFlagSet("jwt-spoa", pflag.ContinueOnError)
 	f.String("config", "", "Path to configuration file")
@@ -58,7 +58,7 @@ func main() {
 	// set up logger
 	logLevel := new(slog.LevelVar)
 	ltString := k.String("logger.type")
-	logger, err := logger.NewLogger(logLevel, logger.WithLoggerType(logger.LoggerType(ltString)))
+	logger, err := slogger.NewLogger(logLevel, slogger.WithLoggerType(slogger.LoggerType(ltString)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting up logger: %s\n", err)
 		os.Exit(1)
