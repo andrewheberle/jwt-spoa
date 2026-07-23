@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/andrewheberle/jwt-spoa/internal/pkg/config"
+	"github.com/andrewheberle/configger"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/spoa"
 	"github.com/andrewheberle/slogger"
 	"github.com/oklog/run"
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// load config
-	k, err := config.LoadConfig(f, config.WithEnvPrefix("JWT"))
+	k, err := configger.LoadConfig(f, configger.WithEnvPrefix("JWT"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error setting up config: %s\n", err)
 		os.Exit(1)
