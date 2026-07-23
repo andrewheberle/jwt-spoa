@@ -2,4 +2,4 @@ dist/
 jwt-spoa
 !cmd/jwt-spoa
 coverage.txt
-
+.env
