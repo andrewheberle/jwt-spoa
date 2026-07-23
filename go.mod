@@ -3,6 +3,7 @@ module github.com/andrewheberle/jwt-spoa
 go 1.25.0
 
 require (
+	github.com/andrewheberle/configger v0.1.0
 	github.com/andrewheberle/slogger v0.2.0
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
