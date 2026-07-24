@@ -1,5 +1,7 @@
 github.com/andrewheberle/configger v0.1.0 h1:JCtXiE8treDmsZ7lx66cjx7ARk4mUQ80DCwgIbd7TMU=
 github.com/andrewheberle/configger v0.1.0/go.mod h1:g2dLidWC7ed90kNz7jTQgvAUikijg8oIidB0r5Q7+PQ=
+github.com/andrewheberle/configger v0.1.1 h1:3PNzb7EG5/h4MFbK2GreD10LtbNGsn+SyQQQmvpya/k=
+github.com/andrewheberle/configger v0.1.1/go.mod h1:g2dLidWC7ed90kNz7jTQgvAUikijg8oIidB0r5Q7+PQ=
 github.com/andrewheberle/slogger v0.2.0 h1:YJJj+94KhFZAYPi0UDjnMuI1pqcdnGprdFqfOQP61K0=
 github.com/andrewheberle/slogger v0.2.0/go.mod h1:V3OFt/DA3hyZwsATCUaItV6UE8L4/+uFpntFuavAXa8=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
