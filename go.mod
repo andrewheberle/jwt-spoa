@@ -6,7 +6,7 @@ require (
 	github.com/andrewheberle/configger v0.1.0
 	github.com/andrewheberle/slogger v0.2.0
 	github.com/coreos/go-oidc/v3 v3.20.0
-	github.com/knadh/koanf/parsers/yaml v1.1.0
+	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/env/v2 v2.0.0
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/providers/posflag v1.0.1
