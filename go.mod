@@ -3,14 +3,14 @@ module github.com/andrewheberle/jwt-spoa
 go 1.25.0
 
 require (
-	github.com/andrewheberle/configger v0.1.0
+	github.com/andrewheberle/configger v0.2.2
 	github.com/andrewheberle/slogger v0.2.0
 	github.com/coreos/go-oidc/v3 v3.20.0
-	github.com/knadh/koanf/parsers/yaml v1.1.0
+	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/env/v2 v2.0.0
 	github.com/knadh/koanf/providers/file v1.2.1
-	github.com/knadh/koanf/providers/posflag v1.0.1
-	github.com/knadh/koanf/v2 v2.3.5
+	github.com/knadh/koanf/providers/posflag v1.0.2
+	github.com/knadh/koanf/v2 v2.4.0
 	github.com/negasus/haproxy-spoe-go v1.0.7
 	github.com/oklog/run v1.2.0
 	github.com/prometheus/client_golang v1.24.0
