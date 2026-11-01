@@ -38,7 +38,8 @@ type Verifier struct {
 // Option configures a Verifier.
 type Option func(*Verifier)
 
-// WithAudience sets the audience (aud) the JWT must contain.
+// WithAudience sets the audience (aud) the JWT must contain. Without it, the
+// audience is not checked.
 func WithAudience(aud string) Option {
 	return func(v *Verifier) {
 		v.config.ClientID = aud
@@ -92,6 +93,10 @@ func New(issuer string, keys oidc.KeySet, opts ...Option) *Verifier {
 		o(v)
 	}
 
+	// go-oidc rejects every JWT when no audience is set unless told to skip
+	// the check
+	v.config.SkipClientIDCheck = v.config.ClientID == ""
+
 	v.verifier = oidc.NewVerifier(v.issuer, v.keys, v.config)
 
 	return v
@@ -101,10 +106,8 @@ func New(issuer string, keys oidc.KeySet, opts ...Option) *Verifier {
 // name. Only configured claims that are present are returned. Each value is a
 // bool, int or string.
 //
-// Any error means the JWT is invalid. Errors wrap ErrInvalidToken,
-// ErrInvalidClaims or ErrMissingRequiredClaim. With ErrMissingRequiredClaim,
-// the claim values extracted before the missing claim was found (in sorted
-// claim order) are also returned.
+// Any error means the JWT is invalid, and no claim values are returned.
+// Errors wrap ErrInvalidToken, ErrInvalidClaims or ErrMissingRequiredClaim.
 func (v *Verifier) Verify(ctx context.Context, signed string) (map[string]any, error) {
 	parsed, err := v.verifier.Verify(ctx, signed)
 	if err != nil {
@@ -121,7 +124,7 @@ func (v *Verifier) Verify(ctx context.Context, signed string) (map[string]any, e
 		raw, ok := all[claim]
 		if !ok {
 			if slices.Contains(v.requiredClaims, claim) {
-				return values, fmt.Errorf("%w: %s", ErrMissingRequiredClaim, claim)
+				return nil, fmt.Errorf("%w: %s", ErrMissingRequiredClaim, claim)
 			}
 			v.logger.Warn("an expected claim was missing", "claim", claim)
 			continue
@@ -129,6 +132,9 @@ func (v *Verifier) Verify(ctx context.Context, signed string) (map[string]any, e
 
 		value, err := toValue(raw)
 		if err != nil {
+			if slices.Contains(v.requiredClaims, claim) {
+				return nil, fmt.Errorf("converting required claim %s: %w: %w", claim, ErrInvalidClaims, err)
+			}
 			v.logger.Warn("problem converting claim value to a supported type", "claim", claim, "error", err)
 			continue
 		}

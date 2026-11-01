@@ -92,16 +92,13 @@ func TestVerifier_Verify(t *testing.T) {
 			want:   map[string]any{"email": "user@example.com"},
 		},
 		{
-			// current behaviour: claims before the missing one (in sorted
-			// order) are returned alongside the error
-			name: "missing required claim returns earlier claims and error",
+			name: "missing required claim returns no claims and error",
 			opts: []verify.Option{
 				verify.WithAudience(audience),
 				verify.WithClaims([]string{"a_claim", "z_claim"}),
 				verify.WithRequiredClaims([]string{"email"}),
 			},
 			claims:  validClaims(map[string]any{"a_claim": "a", "z_claim": "z"}),
-			want:    map[string]any{"a_claim": "a"},
 			wantErr: verify.ErrMissingRequiredClaim,
 		},
 		{
@@ -124,11 +121,9 @@ func TestVerifier_Verify(t *testing.T) {
 			wantErr: verify.ErrInvalidToken,
 		},
 		{
-			// current behaviour: go-oidc requires an audience unless
-			// SkipClientIDCheck is set, so every token is rejected
-			name:    "no audience configured rejects every token",
-			claims:  validClaims(nil),
-			wantErr: verify.ErrInvalidToken,
+			name:   "no audience configured accepts any audience",
+			claims: validClaims(map[string]any{"aud": "anyone"}),
+			want:   map[string]any{},
 		},
 		{
 			name: "disallowed signing method is rejected",

@@ -131,6 +131,12 @@ func (s *Server) handler(req *request.Request) {
 
 	logger := s.logger.With("engineID", req.EngineID, "streamID", req.StreamID, "frameID", req.FrameID, "messages", req.Messages.Len())
 
+	// always return jwt_valid as true/false
+	jwtValid := false
+	defer func() {
+		req.Actions.SetVar(action.ScopeTransaction, "jwt_valid", jwtValid)
+	}()
+
 	msg, err := req.Messages.GetByName(MessageName)
 	if err != nil {
 		status = "error"
@@ -152,25 +158,10 @@ func (s *Server) handler(req *request.Request) {
 		return
 	}
 
-	// ensure we always return jwt_valid as true/false from here onwards
-	jwtValid := false
-	defer func() {
-		req.Actions.SetVar(action.ScopeTransaction, "jwt_valid", jwtValid)
-	}()
-
 	// verify JWT
 	ctx, cancel := context.WithTimeout(s.ctx, time.Second*2)
 	defer cancel()
 	claims, err := s.verifier.Verify(ctx, signed)
-
-	// set claim variables in claim order
-	names := slices.Sorted(maps.Keys(claims))
-	attrs := make([]slog.Attr, 0, len(names))
-	for _, name := range names {
-		attrs = append(attrs, slog.Any(name, claims[name]))
-		req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", name), claims[name])
-	}
-
 	if err != nil {
 		status = "error"
 		switch {
@@ -182,6 +173,14 @@ func (s *Server) handler(req *request.Request) {
 			logger.Error("could not verify JWT", "error", err)
 		}
 		return
+	}
+
+	// set claim variables in claim order, only for a valid JWT
+	names := slices.Sorted(maps.Keys(claims))
+	attrs := make([]slog.Attr, 0, len(names))
+	for _, name := range names {
+		attrs = append(attrs, slog.Any(name, claims[name]))
+		req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", name), claims[name])
 	}
 
 	// mark JWT as valid

@@ -99,9 +99,7 @@ func TestServer_handler(t *testing.T) {
 			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
-			// current behaviour: claims extracted before the missing
-			// required claim are still set
-			name: "missing required claim sets earlier claims and jwt_valid false",
+			name: "missing required claim sets no claims and jwt_valid false",
 			opts: []ServerOption{
 				WithAudience(testAudience),
 				WithClaims([]string{"a_claim"}),
@@ -109,34 +107,28 @@ func TestServer_handler(t *testing.T) {
 			},
 			message: MessageName,
 			values:  map[string]any{"jwt": signer.Sign(t, claims(map[string]any{"a_claim": "a"}))},
-			want: action.Actions{
-				setVar("claims.a_claim", "a"),
-				setVar("jwt_valid", false),
-			},
+			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
-			// current behaviour: jwt_valid is not set
-			name:    "missing jwt-verify message sets nothing",
+			name:    "missing jwt-verify message sets jwt_valid false",
 			opts:    []ServerOption{WithAudience(testAudience)},
 			message: "something-else",
 			values:  map[string]any{"jwt": signer.Sign(t, claims(nil))},
-			want:    action.Actions{},
+			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
-			// current behaviour: jwt_valid is not set
-			name:    "missing jwt key sets nothing",
+			name:    "missing jwt key sets jwt_valid false",
 			opts:    []ServerOption{WithAudience(testAudience)},
 			message: MessageName,
 			values:  map[string]any{"token": signer.Sign(t, claims(nil))},
-			want:    action.Actions{},
+			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
-			// current behaviour: jwt_valid is not set
-			name:    "jwt of wrong type sets nothing",
+			name:    "jwt of wrong type sets jwt_valid false",
 			opts:    []ServerOption{WithAudience(testAudience)},
 			message: MessageName,
 			values:  map[string]any{"jwt": 42},
-			want:    action.Actions{},
+			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 	}
 	for _, tt := range tests {
