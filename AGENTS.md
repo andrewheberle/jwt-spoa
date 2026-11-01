@@ -2,6 +2,7 @@
 
 ## Repository layout
 - `cmd/` - entrypoints for commands; should only include minimal code then call Execute of the relevant package
+- `example/` - an example deployment using Docker Compose
 - `internal/` - application packages; not importable by other modules
 - `systemd/` - Systemd Unit included with APT package build
 
