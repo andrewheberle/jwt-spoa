@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
@@ -25,8 +26,29 @@ const (
 	MessageName = "jwt-verify"
 )
 
+// Config holds the settings for a Server.
+type Config struct {
+	// Listen is the address the SPOA listens on.
+	Listen string
+	// Issuer is the issuer (iss) the JWT must contain. Required.
+	Issuer string
+	// JWKS is the URL of the JSON Web Key Set used to verify JWT signatures.
+	// Defaults to ISSUER/.well-known/jwks.json.
+	JWKS string
+	// Audience is the audience (aud) the JWT must contain. The audience is
+	// not checked if empty.
+	Audience string
+	// Methods are the accepted signing methods. At least one is required.
+	Methods []string
+	// Claims are the claims to extract when present.
+	Claims []string
+	// RequiredClaims are the claims that must be present.
+	RequiredClaims []string
+}
+
 type Server struct {
 	addr     string
+	jwks     string
 	logger   *slog.Logger
 	registry *prometheus.Registry
 
@@ -34,18 +56,28 @@ type Server struct {
 	cancel context.CancelFunc
 
 	// jwt verification
-	verifyOpts []verify.Option
-	verifier   *verify.Verifier
+	verifier *verify.Verifier
 
 	// metrics
 	requestDuration *prometheus.HistogramVec
 }
 
-func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*Server, error) {
+// NewServer returns a Server for cfg. It returns an error if cfg is invalid.
+func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
+	jwks := cfg.JWKS
+	if jwks == "" {
+		u, err := url.JoinPath(cfg.Issuer, ".well-known/jwks.json")
+		if err != nil {
+			return nil, fmt.Errorf("creating JWKS URL from issuer: %w", err)
+		}
+		jwks = u
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		addr:     addr,
+		addr:     cfg.Listen,
+		jwks:     jwks,
 		logger:   slog.New(slog.DiscardHandler),
 		registry: prometheus.NewRegistry(),
 		ctx:      ctx,
@@ -57,7 +89,12 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	}
 
 	// set up jwt verifier
-	s.verifier = verify.New(issuer, oidc.NewRemoteKeySet(ctx, jwks), append(s.verifyOpts, verify.WithLogger(s.logger))...)
+	v, err := newVerifier(cfg, oidc.NewRemoteKeySet(ctx, jwks), s.logger)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	s.verifier = v
 
 	// set up metrics
 	s.requestDuration = prometheus.NewHistogramVec(
@@ -79,8 +116,24 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	return s, nil
 }
 
+// newVerifier returns the JWT verifier for cfg, checking signatures against keys.
+func newVerifier(cfg Config, keys oidc.KeySet, logger *slog.Logger) (*verify.Verifier, error) {
+	v, err := verify.New(cfg.Issuer, keys,
+		verify.WithAudience(cfg.Audience),
+		verify.WithValidMethods(cfg.Methods),
+		verify.WithClaims(cfg.Claims),
+		verify.WithRequiredClaims(cfg.RequiredClaims),
+		verify.WithLogger(logger),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating verifier: %w", err)
+	}
+
+	return v, nil
+}
+
 func (s *Server) ListenAndServe() error {
-	s.logger.Info("starting SPOA server", "listen", s.addr)
+	s.logger.Info("starting SPOA server", "listen", s.addr, "jwks", s.jwks)
 	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		s.logger.Error("could not create listener", "error", err)

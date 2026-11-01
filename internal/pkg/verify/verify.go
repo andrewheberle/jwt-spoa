@@ -46,7 +46,7 @@ func WithAudience(aud string) Option {
 	}
 }
 
-// WithValidMethods sets the accepted signing methods.
+// WithValidMethods sets the accepted signing methods. The default is RS256.
 func WithValidMethods(methods []string) Option {
 	return func(v *Verifier) {
 		v.config.SupportedSigningAlgs = methods
@@ -78,12 +78,17 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // New returns a Verifier for JWTs from issuer, whose signatures are checked
-// against keys.
-func New(issuer string, keys oidc.KeySet, opts ...Option) *Verifier {
+// against keys. The issuer must not be empty and at least one signing method
+// must be accepted.
+func New(issuer string, keys oidc.KeySet, opts ...Option) (*Verifier, error) {
+	if issuer == "" {
+		return nil, errors.New("issuer must be provided")
+	}
+
 	v := &Verifier{
 		issuer:         issuer,
 		keys:           keys,
-		config:         &oidc.Config{},
+		config:         &oidc.Config{SupportedSigningAlgs: []string{oidc.RS256}},
 		claims:         make([]string, 0),
 		requiredClaims: make([]string, 0),
 		logger:         slog.New(slog.DiscardHandler),
@@ -93,13 +98,17 @@ func New(issuer string, keys oidc.KeySet, opts ...Option) *Verifier {
 		o(v)
 	}
 
+	if len(v.config.SupportedSigningAlgs) == 0 {
+		return nil, errors.New("at least one signing method must be provided")
+	}
+
 	// go-oidc rejects every JWT when no audience is set unless told to skip
 	// the check
 	v.config.SkipClientIDCheck = v.config.ClientID == ""
 
 	v.verifier = oidc.NewVerifier(v.issuer, v.keys, v.config)
 
-	return v
+	return v, nil
 }
 
 // Verify verifies the signed JWT and returns its claim values, keyed by claim

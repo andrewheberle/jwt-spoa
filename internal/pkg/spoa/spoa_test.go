@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify/verifytest"
 	"github.com/negasus/haproxy-spoe-go/action"
 	"github.com/negasus/haproxy-spoe-go/message"
@@ -18,18 +17,28 @@ const (
 	testAudience = "jwt-spoa"
 )
 
-// newTestServer returns a Server whose verifier checks JWTs against signer
-// rather than a remote JWKS.
-func newTestServer(t *testing.T, signer *verifytest.Signer, opts ...ServerOption) *Server {
+// newTestServer returns a Server for cfg whose verifier checks JWTs against
+// signer rather than a remote JWKS. Listen, Issuer, JWKS and Methods are
+// filled in.
+func newTestServer(t *testing.T, signer *verifytest.Signer, cfg Config) *Server {
 	t.Helper()
 
-	s, err := NewServer("127.0.0.1:0", "http://127.0.0.1:0/jwks.json", testIssuer, opts...)
+	cfg.Listen = "127.0.0.1:0"
+	cfg.Issuer = testIssuer
+	cfg.JWKS = "http://127.0.0.1:0/jwks.json"
+	cfg.Methods = []string{"RS256"}
+
+	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
 	t.Cleanup(func() { _ = s.Shutdown() })
 
-	s.verifier = verify.New(testIssuer, signer.KeySet(), s.verifyOpts...)
+	v, err := newVerifier(cfg, signer.KeySet(), s.logger)
+	if err != nil {
+		t.Fatalf("newVerifier() error = %v", err)
+	}
+	s.verifier = v
 
 	return s
 }
@@ -70,16 +79,16 @@ func TestServer_handler(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		opts    []ServerOption
+		cfg     Config
 		message string
 		values  map[string]any
 		want    action.Actions
 	}{
 		{
 			name: "valid JWT sets claims then jwt_valid true",
-			opts: []ServerOption{
-				WithAudience(testAudience),
-				WithClaims([]string{"email", "admin"}),
+			cfg: Config{
+				Audience: testAudience,
+				Claims:   []string{"email", "admin"},
 			},
 			message: MessageName,
 			values: map[string]any{
@@ -93,17 +102,17 @@ func TestServer_handler(t *testing.T) {
 		},
 		{
 			name:    "JWT signed by another key sets jwt_valid false",
-			opts:    []ServerOption{WithAudience(testAudience)},
+			cfg:     Config{Audience: testAudience},
 			message: MessageName,
 			values:  map[string]any{"jwt": other.Sign(t, claims(nil))},
 			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
 			name: "missing required claim sets no claims and jwt_valid false",
-			opts: []ServerOption{
-				WithAudience(testAudience),
-				WithClaims([]string{"a_claim"}),
-				WithRequiredClaims([]string{"email"}),
+			cfg: Config{
+				Audience:       testAudience,
+				Claims:         []string{"a_claim"},
+				RequiredClaims: []string{"email"},
 			},
 			message: MessageName,
 			values:  map[string]any{"jwt": signer.Sign(t, claims(map[string]any{"a_claim": "a"}))},
@@ -111,21 +120,21 @@ func TestServer_handler(t *testing.T) {
 		},
 		{
 			name:    "missing jwt-verify message sets jwt_valid false",
-			opts:    []ServerOption{WithAudience(testAudience)},
+			cfg:     Config{Audience: testAudience},
 			message: "something-else",
 			values:  map[string]any{"jwt": signer.Sign(t, claims(nil))},
 			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
 			name:    "missing jwt key sets jwt_valid false",
-			opts:    []ServerOption{WithAudience(testAudience)},
+			cfg:     Config{Audience: testAudience},
 			message: MessageName,
 			values:  map[string]any{"token": signer.Sign(t, claims(nil))},
 			want:    action.Actions{setVar("jwt_valid", false)},
 		},
 		{
 			name:    "jwt of wrong type sets jwt_valid false",
-			opts:    []ServerOption{WithAudience(testAudience)},
+			cfg:     Config{Audience: testAudience},
 			message: MessageName,
 			values:  map[string]any{"jwt": 42},
 			want:    action.Actions{setVar("jwt_valid", false)},
@@ -133,7 +142,7 @@ func TestServer_handler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := newTestServer(t, signer, tt.opts...)
+			s := newTestServer(t, signer, tt.cfg)
 			req := newRequest(tt.message, tt.values)
 			defer request.ReleaseRequest(req)
 
@@ -147,7 +156,7 @@ func TestServer_handler(t *testing.T) {
 }
 
 func TestServer_metricsHelp(t *testing.T) {
-	s := newTestServer(t, verifytest.NewSigner(t))
+	s := newTestServer(t, verifytest.NewSigner(t), Config{})
 
 	// observe once so the histogram is gathered
 	s.requestDuration.WithLabelValues("success").Observe(0)
@@ -177,6 +186,66 @@ func TestServer_metricsHelp(t *testing.T) {
 				}
 			}
 			t.Fatalf("metric %s not registered", tt.name)
+		})
+	}
+}
+
+func TestNewServer(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		wantJWKS string
+		wantErr  bool
+	}{
+		{
+			name: "explicit JWKS is used",
+			cfg: Config{
+				Issuer:  testIssuer,
+				JWKS:    "https://keys.example.com/jwks.json",
+				Methods: []string{"RS256"},
+			},
+			wantJWKS: "https://keys.example.com/jwks.json",
+		},
+		{
+			name:     "empty JWKS defaults from issuer",
+			cfg:      Config{Issuer: testIssuer, Methods: []string{"RS256"}},
+			wantJWKS: testIssuer + "/.well-known/jwks.json",
+		},
+		{
+			name:     "issuer with trailing slash gives a clean JWKS URL",
+			cfg:      Config{Issuer: testIssuer + "/", Methods: []string{"RS256"}},
+			wantJWKS: testIssuer + "/.well-known/jwks.json",
+		},
+		{
+			name:    "issuer that is not a URL is an error when JWKS is empty",
+			cfg:     Config{Issuer: "%zz", Methods: []string{"RS256"}},
+			wantErr: true,
+		},
+		{
+			name:    "empty issuer is an error",
+			cfg:     Config{JWKS: "https://keys.example.com/jwks.json", Methods: []string{"RS256"}},
+			wantErr: true,
+		},
+		{
+			name:    "empty methods is an error",
+			cfg:     Config{Issuer: testIssuer},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := NewServer(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NewServer() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			t.Cleanup(func() { _ = s.Shutdown() })
+
+			if s.jwks != tt.wantJWKS {
+				t.Errorf("JWKS = %q, want %q", s.jwks, tt.wantJWKS)
+			}
 		})
 	}
 }
