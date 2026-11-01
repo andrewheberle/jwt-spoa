@@ -6,19 +6,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"time"
 
 	"github.com/andrewheberle/configger"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/spoa"
 	"github.com/andrewheberle/jwt-spoa/internal/version"
 	"github.com/andrewheberle/slogger"
-	"github.com/oklog/run"
 	"github.com/spf13/pflag"
 )
 
 // Execute runs jwt-spoa with the command line arguments args (excluding the
-// program name) until ctx is cancelled or a listener fails. It reports every
+// program name) until ctx is cancelled or a listener fails. It returns nil
+// when stopped by ctx. It reports every
 // error itself, to stderr before logging is set up and through the logger
 // after, and also returns it.
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -79,6 +77,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		Methods:        k.Strings("jwt.methods"),
 		Claims:         k.Strings("jwt.claims"),
 		RequiredClaims: k.Strings("jwt.requiredclaims"),
+		MetricsListen:  k.String("metrics.listen"),
+		MetricsPath:    k.String("metrics.path"),
 	}
 	srv, err := spoa.NewServer(cfg, spoa.WithLogger(logger))
 	if err != nil {
@@ -86,58 +86,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return fmt.Errorf("setting up server: %w", err)
 	}
 
-	g := run.Group{}
-
-	ctx, cancel := context.WithCancel(ctx)
-	g.Add(func() error {
-		<-ctx.Done()
-		return nil
-	}, func(error) {
-		cancel()
-	})
-
-	g.Add(func() error {
-		return srv.ListenAndServe()
-	}, func(err error) {
-		if err != nil {
-			logger.Error("got error from server", "error", err, "listen", cfg.Listen)
-		}
-		_ = srv.Shutdown()
-	})
-
-	if metricsListen := k.String("metrics.listen"); metricsListen != "" {
-		// set up metrics
-		metricsPath := k.String("metrics.path")
-		h := http.NewServeMux()
-		h.Handle(metricsPath, srv.MetricsHandler())
-
-		metrics := &http.Server{
-			Addr:         metricsListen,
-			Handler:      h,
-			ReadTimeout:  time.Second * 2,
-			WriteTimeout: time.Second * 2,
-		}
-
-		g.Add(func() error {
-			logger.Info("starting metrics listener", "listen", metricsListen, "path", metricsPath)
-			return metrics.ListenAndServe()
-		}, func(err error) {
-			if err != nil {
-				logger.Error("got error from metrics listener", "error", err, "listen", metricsListen, "path", metricsPath)
-			}
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
-				defer cancel()
-
-				if err := metrics.Shutdown(ctx); err != nil {
-					logger.Error("got error while shutting down metrics listener", "error", err, "listen", metricsListen, "path", metricsPath)
-				}
-			}()
-		})
-	}
-
-	if err := g.Run(); err != nil {
-		logger.Error("got an error", "error", err)
+	if err := srv.Run(ctx); err != nil {
+		logger.Error("got an error", "error", err, "listen", cfg.Listen, "metrics.listen", cfg.MetricsListen)
 		return fmt.Errorf("running: %w", err)
 	}
 

@@ -44,16 +44,20 @@ type Config struct {
 	Claims []string
 	// RequiredClaims are the claims that must be present.
 	RequiredClaims []string
+	// MetricsListen is the address the Prometheus metrics listener listens
+	// on. No metrics listener is started if empty.
+	MetricsListen string
+	// MetricsPath is the path metrics are served on. Defaults to /metrics.
+	MetricsPath string
 }
 
 type Server struct {
-	addr     string
-	jwks     string
-	logger   *slog.Logger
-	registry *prometheus.Registry
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	addr        string
+	metricsAddr string
+	metricsPath string
+	jwks        string
+	logger      *slog.Logger
+	registry    *prometheus.Registry
 
 	// jwt verification
 	verifier *verify.Verifier
@@ -73,25 +77,27 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		jwks = u
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	metricsPath := cfg.MetricsPath
+	if metricsPath == "" {
+		metricsPath = "/metrics"
+	}
 
 	s := &Server{
-		addr:     cfg.Listen,
-		jwks:     jwks,
-		logger:   slog.New(slog.DiscardHandler),
-		registry: prometheus.NewRegistry(),
-		ctx:      ctx,
-		cancel:   cancel,
+		addr:        cfg.Listen,
+		metricsAddr: cfg.MetricsListen,
+		metricsPath: metricsPath,
+		jwks:        jwks,
+		logger:      slog.New(slog.DiscardHandler),
+		registry:    prometheus.NewRegistry(),
 	}
 
 	for _, o := range opts {
 		o(s)
 	}
 
-	// set up jwt verifier
-	v, err := newVerifier(cfg, oidc.NewRemoteKeySet(ctx, jwks), s.logger)
+	// set up jwt verifier; the key set ignores cancellation of its context
+	v, err := newVerifier(cfg, oidc.NewRemoteKeySet(context.Background(), jwks), s.logger)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 	s.verifier = v
@@ -132,50 +138,95 @@ func newVerifier(cfg Config, keys oidc.KeySet, logger *slog.Logger) (*verify.Ver
 	return v, nil
 }
 
-func (s *Server) ListenAndServe() error {
-	s.logger.Info("starting SPOA server", "listen", s.addr, "jwks", s.jwks)
+// Run serves the SPOA, and the metrics listener when configured, until ctx
+// is cancelled or a listener fails. It returns nil once stopped by ctx, and
+// an error if a listener could not be created or failed. A Server is run
+// once.
+func (s *Server) Run(ctx context.Context) error {
 	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		s.logger.Error("could not create listener", "error", err)
-		return fmt.Errorf("could not create listener: %w", err)
+		return fmt.Errorf("creating SPOA listener: %w", err)
 	}
 
-	a := agent.New(s.handler, s)
+	var ml net.Listener
+	if s.metricsAddr != "" {
+		ml, err = net.Listen("tcp", s.metricsAddr)
+		if err != nil {
+			_ = l.Close()
+			return fmt.Errorf("creating metrics listener: %w", err)
+		}
+	}
 
-	errCh := make(chan error, 1)
+	return s.run(ctx, l, ml)
+}
 
+// run serves the SPOA on l, and metrics on ml when it is not nil, until ctx
+// is cancelled or either stops. Both listeners are closed when run returns.
+func (s *Server) run(ctx context.Context, l, ml net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errs := make(chan error, 2)
+	running := 0
+
+	s.logger.Info("starting SPOA server", "listen", l.Addr().String(), "jwks", s.jwks)
+	a := agent.New(func(req *request.Request) { s.handler(ctx, req) }, s)
+	running++
 	go func() {
-		errCh <- a.Serve(l)
+		// Serve only returns once the listener fails or is closed
+		errs <- fmt.Errorf("serving SPOA: %w", a.Serve(l))
 	}()
 
-	select {
-	case err := <-errCh:
-		return err
-	case <-s.ctx.Done():
-		closeErr := l.Close()
-		serveErr := <-errCh
-		if closeErr != nil {
-			return closeErr
+	var metrics *http.Server
+	if ml != nil {
+		mux := http.NewServeMux()
+		mux.Handle(s.metricsPath, promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{
+			Registry: s.registry,
+		}))
+		metrics = &http.Server{
+			Handler:      mux,
+			ReadTimeout:  time.Second * 2,
+			WriteTimeout: time.Second * 2,
 		}
-		if errors.Is(serveErr, net.ErrClosed) {
-			return s.ctx.Err()
-		}
-		return serveErr
+
+		s.logger.Info("starting metrics listener", "listen", ml.Addr().String(), "path", s.metricsPath)
+		running++
+		go func() {
+			// Serve only returns once the listener fails or the server is shut down
+			errs <- fmt.Errorf("serving metrics: %w", metrics.Serve(ml))
+		}()
 	}
+
+	// wait for cancellation or for a listener to stop
+	var err error
+	select {
+	case <-ctx.Done():
+	case err = <-errs:
+		running--
+	}
+
+	// stop the SPOA listener; open connections are not drained
+	_ = l.Close()
+
+	if metrics != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second*2)
+		defer shutdownCancel()
+
+		if err := metrics.Shutdown(shutdownCtx); err != nil {
+			s.logger.Error("got error while shutting down metrics listener", "error", err)
+		}
+	}
+
+	// wait for the remaining listeners, whose errors are from being stopped
+	for ; running > 0; running-- {
+		stopped := <-errs
+		s.logger.Debug("listener stopped", "reason", stopped)
+	}
+
+	return err
 }
 
-func (s *Server) Shutdown() error {
-	s.cancel()
-	return nil
-}
-
-func (s *Server) MetricsHandler() http.Handler {
-	return promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{
-		Registry: s.registry,
-	})
-}
-
-func (s *Server) handler(req *request.Request) {
+func (s *Server) handler(ctx context.Context, req *request.Request) {
 	start := time.Now()
 	status := "success"
 	defer func() {
@@ -212,7 +263,7 @@ func (s *Server) handler(req *request.Request) {
 	}
 
 	// verify JWT
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*2)
+	ctx, cancel := context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
 	claims, err := s.verifier.Verify(ctx, signed)
 	if err != nil {
