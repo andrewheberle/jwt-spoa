@@ -76,17 +76,16 @@ spoe-group verify
 
 The following variables are returned by the agent to HAProxy:
 
-* txn.PREFIX.jwt_valid (boolean) - If the JWT was valid
-* txn.PREFIX.claims.CLAIM (string/integer) - Claims in the JWT
+* txn.PREFIX.jwt_valid (boolean) - If the JWT was valid; always set to `true` or `false`
+* txn.PREFIX.claims.CLAIM (string/integer) - Claims in the JWT; only set when `txn.PREFIX.jwt_valid` is `true`
 
 The claims returned in `txn.PREFIX.claims.CLAIM` depend on what is provided to
 the SPOA configuration. Claims that are not found are omitted but a warning is
 logged.
 
-If any claims specified as required are not found then parsing of the JWT is
-stopped and `txn.PREFIX.jwt_valid` is returned as `false`, so in this case
-there may or may not be some claims returned depending on the order in which
-they were processed.
+If any claims specified as required are not found (or cannot be converted to a
+supported type) then the JWT is treated as invalid, `txn.PREFIX.jwt_valid` is
+returned as `false` and no claims are returned.
 
 ### What About Native JWT Fetches?
 
@@ -182,21 +181,21 @@ options from lower levels:
 
 The following command line options are supported:
 
-| Option             | Type       | Default                        | Description                                  |
-|--------------------|------------|--------------------------------|----------------------------------------------|
-| config             | `string`   |                                | Path to YAML configuration file              |
-| debug              | `boolean`  | `false`                        | Enable debug logging                         |
-| jwt.aud            | `string`   |                                | Audience (aud) expected for JWT verification |
-| jwt.claims         | `[]string` | `["email"]`                    | Claims to extract from JWT's                 |
-| jwt.requiredclaims | `[]string` |                                | Required claims to extract from JWT's        |
-| jwt.iss            | `string`   |                                | Issuer (iss) claim of the JWT's (required)   |
-| jwt.jwks           | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                          |
-| jwt.methods        | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's    |
-| listen             | `string`   | `127.0.0.1:3000`               | SPOA listen address                          |
-| logger.type        | `string`   | `auto`                         | Logger type (auto, systemd, json or text)    |
-| metrics.listen     | `string`   |                                | Listen address for Prometheus metrics        |
-| metrics.path       | `string`   | `/metrics`                     | Path for Prometheus metrics                  |
-| version            | `boolean`  | `false`                        | Show version and exit                        |
+| Option             | Type       | Default                        | Description                                                        |
+|--------------------|------------|--------------------------------|--------------------------------------------------------------------|
+| config             | `string`   |                                | Path to YAML configuration file                                    |
+| debug              | `boolean`  | `false`                        | Enable debug logging                                               |
+| jwt.aud            | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty |
+| jwt.claims         | `[]string` | `["email"]`                    | Claims to extract from JWT's                                       |
+| jwt.requiredclaims | `[]string` |                                | Required claims to extract from JWT's                              |
+| jwt.iss            | `string`   |                                | Issuer (iss) claim of the JWT's (required)                         |
+| jwt.jwks           | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                |
+| jwt.methods        | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                          |
+| listen             | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                |
+| logger.type        | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                          |
+| metrics.listen     | `string`   |                                | Listen address for Prometheus metrics                              |
+| metrics.path       | `string`   | `/metrics`                     | Path for Prometheus metrics                                        |
+| version            | `boolean`  | `false`                        | Show version and exit                                              |
 
 ### Environment
 
