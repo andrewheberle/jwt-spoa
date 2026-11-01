@@ -223,3 +223,46 @@ func TestNew(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkVerifier_Verify(b *testing.B) {
+	signer := verifytest.NewSigner(b)
+	other := verifytest.NewSigner(b)
+
+	v, err := verify.New(issuer, signer.KeySet(),
+		verify.WithAudience(audience),
+		verify.WithClaims([]string{"email"}),
+		verify.WithRequiredClaims([]string{"email"}),
+	)
+	if err != nil {
+		b.Fatalf("New() error = %v", err)
+	}
+
+	email := map[string]any{"email": "user@example.com"}
+	expired := map[string]any{"email": "user@example.com", "exp": time.Now().Add(-time.Hour).Unix()}
+
+	benchmarks := []struct {
+		name    string
+		jwt     string
+		wantErr error
+	}{
+		{name: "jwt=valid", jwt: signer.Sign(b, validClaims(email))},
+		{name: "jwt=badsig", jwt: other.Sign(b, validClaims(email)), wantErr: verify.ErrInvalidToken},
+		{name: "jwt=expired", jwt: signer.Sign(b, validClaims(expired)), wantErr: verify.ErrInvalidToken},
+		{name: "jwt=missingclaim", jwt: signer.Sign(b, validClaims(nil)), wantErr: verify.ErrMissingRequiredClaim},
+		{name: "jwt=malformed", jwt: "not-a-jwt", wantErr: verify.ErrInvalidToken},
+	}
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			ctx := context.Background()
+
+			// make sure the benchmark measures the outcome it is named for
+			if _, err := v.Verify(ctx, bm.jwt); !errors.Is(err, bm.wantErr) {
+				b.Fatalf("Verify() error = %v, want %v", err, bm.wantErr)
+			}
+
+			for b.Loop() {
+				_, _ = v.Verify(ctx, bm.jwt)
+			}
+		})
+	}
+}

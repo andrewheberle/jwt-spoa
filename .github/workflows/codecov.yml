@@ -35,6 +35,11 @@ jobs:
       - name: Run Go tests with coverage
         run: go test -coverprofile=coverage.txt ./...
 
+      # run each benchmark once so they keep compiling and working; the
+      # HAProxy comparison is behind the bench build tag and is not run here
+      - name: Run Go benchmarks once
+        run: go test -run='^$' -bench=. -benchtime=1x ./...
+
       - name: Upload results to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
