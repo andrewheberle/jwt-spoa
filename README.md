@@ -108,38 +108,38 @@ equivalent, however the built-in JWT handling requires significantly more
 configuration and the certificate used to verify the JWT to have been
 downloaded and available in PEM format when HAProxy was started/reloaded:
 
-```
+```haproxy
 frontend fe_builtin_jwt
-	# extract JWT from request (reject if not found)
-	http-request reject unless { http_auth_bearer -m found }
-	http-request set-var(txn.jwt) http_auth_bearer
-	# extract and check algorithm
-	http-request set-var(txn.jwt_alg) var(txn.jwt),jwt_header_query('$.alg')
-	http-request deny unless { var(txn.jwt_alg) -m str "RS256" }
-	# extract and check issuer
-	http-request set-var(txn.jwt_iss) var(txn.jwt),jwt_payload_query('$.iss')
-	http-request deny unless { var(txn.jwt_iss) -m str "https://idp.example.com" }
-	# extract and check audience
-	http-request set-var(txn.jwt_aud) var(txn.jwt),jwt_payload_query('$.aud')
+    # extract JWT from request (reject if not found)
+    http-request reject unless { http_auth_bearer -m found }
+    http-request set-var(txn.jwt) http_auth_bearer
+    # extract and check algorithm
+    http-request set-var(txn.jwt_alg) var(txn.jwt),jwt_header_query('$.alg')
+    http-request deny unless { var(txn.jwt_alg) -m str "RS256" }
+    # extract and check issuer
+    http-request set-var(txn.jwt_iss) var(txn.jwt),jwt_payload_query('$.iss')
+    http-request deny unless { var(txn.jwt_iss) -m str "https://idp.example.com" }
+    # extract and check audience
+    http-request set-var(txn.jwt_aud) var(txn.jwt),jwt_payload_query('$.aud')
     http-request deny unless { var(txn.jwt_aud) -m reg \[\"allowed-jwd-audience\"\] }
-	# extract and check expiry
-	http-request set-var(txn.jwt_exp) var(txn.jwt),jwt_payload_query('$.exp','int')
-  	http-request set-var(txn.now) date
-	http-request deny if { var(txn.jwt_exp),sub(txn.now) lt 0 }
-	# verify JWT signature
-	http-request deny unless { var(txn.jwt),jwt_verify(txn.jwt_alg,"/path/to/pubkey.pem") 1 }
-	# deny unless email claim is found
-	http-request deny unless { var(txn.jwt),jwt_payload_query('$.email') -m found }
-	http-request set-var(txn.jwt.claims.email) var(txn.jwt),jwt_payload_query('$.email')
+    # extract and check expiry
+    http-request set-var(txn.jwt_exp) var(txn.jwt),jwt_payload_query('$.exp','int')
+    http-request set-var(txn.now) date
+    http-request deny if { var(txn.jwt_exp),sub(txn.now) lt 0 }
+    # verify JWT signature
+    http-request deny unless { var(txn.jwt),jwt_verify(txn.jwt_alg,"/path/to/pubkey.pem") 1 }
+    # deny unless email claim is found
+    http-request deny unless { var(txn.jwt),jwt_payload_query('$.email') -m found }
+    http-request set-var(txn.jwt.claims.email) var(txn.jwt),jwt_payload_query('$.email')
 
 frontend fe_spoa_jwt
-	# extract JWT from request (reject if not found)
-	http-request reject unless { http_auth_bearer -m found }
-	http-request set-var(txn.jwt) http_auth_bearer
-	filter spoe engine jwt config /path/to/spoe.cfg
-	http-request send-spoe-group jwt verify
-	# check that JWT was valid (checks aud, iss, exp, signature and that an email claim exists)
-	http-request deny unless { var(txn.jwt.jwt_valid) -m bool 1 }
+    # extract JWT from request (reject if not found)
+    http-request reject unless { http_auth_bearer -m found }
+    http-request set-var(txn.jwt) http_auth_bearer
+    filter spoe engine jwt config /path/to/spoe.cfg
+    http-request send-spoe-group jwt verify
+    # check that JWT was valid (checks aud, iss, exp, signature and that an email claim exists)
+    http-request deny unless { var(txn.jwt.jwt_valid) -m bool 1 }
 ```
 
 The config used for the SPOA for the above would be as follows:
