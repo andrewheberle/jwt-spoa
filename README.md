@@ -219,6 +219,19 @@ metrics:
   listen: ':9200'
 ```
 
+## Shutdown
+
+On `SIGINT` or `SIGTERM` (for example from `systemctl stop`) the service stops
+gracefully and exits with status `0`:
+
+1. The SPOA listener stops accepting new connections. Connections from HAProxy
+   that are already open are not drained, and any JWT verification still in
+   progress is cancelled.
+2. The metrics listener, if enabled, is shut down, waiting up to 2 seconds for
+   in-flight scrapes to finish.
+
+A second `SIGINT` or `SIGTERM` during shutdown stops the service immediately.
+
 ## Logging
 
 By default the service will log to `stderr` in one of two formats based on the
