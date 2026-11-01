@@ -10,7 +10,7 @@ require (
 	github.com/knadh/koanf/providers/env/v2 v2.0.0
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/providers/posflag v1.0.2
-	github.com/knadh/koanf/v2 v2.4.0
+	github.com/knadh/koanf/v2 v2.4.1
 	github.com/negasus/haproxy-spoe-go v1.0.8
 	github.com/oklog/run v1.2.0
 	github.com/prometheus/client_golang v1.25.0
