@@ -181,8 +181,10 @@ from requests sent 12 at a time, so the latencies include time spent queued.
 
 The load generator, HAProxy and the SPOA all share the same CPUs, which costs
 the SPOA more than native verification as it is an extra process doing work.
-A JWT with an invalid signature also costs the SPOA more than a valid one, as
-its key set is fetched again from the JWKS URL in case the keys have changed.
+These figures were measured before key set refreshes were limited (see
+[Key Set Refresh](#key-set-refresh)): each JWT with an invalid signature then
+fetched the key set again from the JWKS URL, which made it cost the SPOA more
+than a valid one.
 
 To run the benchmarks, with `haproxy` on your `PATH` (or set `HAPROXY_BIN` to
 its location) and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
@@ -210,21 +212,22 @@ options from lower levels:
 
 The following command line options are supported:
 
-| Option             | Type       | Default                        | Description                                                        |
-|--------------------|------------|--------------------------------|--------------------------------------------------------------------|
-| config             | `string`   |                                | Path to YAML configuration file                                    |
-| debug              | `boolean`  | `false`                        | Enable debug logging                                               |
-| jwt.aud            | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty |
-| jwt.claims         | `[]string` | `["email"]`                    | Claims to extract from JWT's                                       |
-| jwt.requiredclaims | `[]string` |                                | Required claims to extract from JWT's                              |
-| jwt.iss            | `string`   |                                | Issuer (iss) claim of the JWT's (required)                         |
-| jwt.jwks           | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                |
-| jwt.methods        | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                          |
-| listen             | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                |
-| logger.type        | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                          |
-| metrics.listen     | `string`   |                                | Listen address for Prometheus metrics                              |
-| metrics.path       | `string`   | `/metrics`                     | Path for Prometheus metrics                                        |
-| version            | `boolean`  | `false`                        | Show version and exit                                              |
+| Option               | Type       | Default                        | Description                                                        |
+|----------------------|------------|--------------------------------|--------------------------------------------------------------------|
+| config               | `string`   |                                | Path to YAML configuration file                                    |
+| debug                | `boolean`  | `false`                        | Enable debug logging                                               |
+| jwt.aud              | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty |
+| jwt.claims           | `[]string` | `["email"]`                    | Claims to extract from JWT's                                       |
+| jwt.requiredclaims   | `[]string` |                                | Required claims to extract from JWT's                              |
+| jwt.iss              | `string`   |                                | Issuer (iss) claim of the JWT's (required)                         |
+| jwt.jwks             | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                |
+| jwt.jwks-min-refresh | `duration` | `1m`                           | Minimum time between JWKS fetches; must be greater than 0          |
+| jwt.methods          | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                          |
+| listen               | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                |
+| logger.type          | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                          |
+| metrics.listen       | `string`   |                                | Listen address for Prometheus metrics                              |
+| metrics.path         | `string`   | `/metrics`                     | Path for Prometheus metrics                                        |
+| version              | `boolean`  | `false`                        | Show version and exit                                              |
 
 ### Environment
 
@@ -247,6 +250,34 @@ debug: false
 metrics:
   listen: ':9200'
 ```
+
+## Key Set Refresh
+
+The JWKS is fetched from the JWKS URL when the first JWT arrives, and the keys
+are cached. When a JWT's signature does not verify against the cached keys,
+the key set is fetched again in case the identity provider has rotated its
+keys.
+
+To stop JWTs with invalid signatures from driving requests at the JWKS URL, a
+key set refresh is only sent if the previous fetch started at least
+`jwt.jwks-min-refresh` ago (default `1m`). Otherwise the JWT is rejected
+without a fetch. Failed fetches count towards this limit too, and each fetch
+times out after 10 seconds.
+
+The trade-off is that after the identity provider starts signing with a new
+key, JWTs signed with it may be rejected for up to `jwt.jwks-min-refresh`.
+Most identity providers publish new keys before signing with them, so this
+is rarely seen in practice.
+
+Two Prometheus metrics show this activity:
+
+| Metric                                 | Type      | Description                                                         |
+|----------------------------------------|-----------|---------------------------------------------------------------------|
+| `jwt_agent_jwks_fetches_total`         | `counter` | JWKS fetches sent, labelled `result` of `success` or `error`        |
+| `jwt_agent_jwks_fetches_skipped_total` | `counter` | Key set refreshes refused because the previous fetch was too recent |
+
+An `error` is a failed request or a response other than `200 OK`. A response
+that is not a valid key set still counts as a `success`.
 
 ## Shutdown
 

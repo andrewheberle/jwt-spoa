@@ -79,6 +79,7 @@ func startAgent(b *testing.B, addr, jwks string) {
 		Listen:         addr,
 		Issuer:         testIssuer,
 		JWKS:           jwks,
+		JWKSMinRefresh: time.Minute,
 		Audience:       testAudience,
 		Methods:        []string{"RS256"},
 		Claims:         []string{"email"},

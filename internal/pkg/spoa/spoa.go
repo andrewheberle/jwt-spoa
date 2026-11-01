@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/andrewheberle/jwt-spoa/internal/pkg/jwks"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/negasus/haproxy-spoe-go/action"
@@ -24,6 +25,9 @@ import (
 
 const (
 	MessageName = "jwt-verify"
+
+	// jwksTimeout is how long a single JWKS fetch may take.
+	jwksTimeout = time.Second * 10
 )
 
 // Config holds the settings for a Server.
@@ -35,6 +39,10 @@ type Config struct {
 	// JWKS is the URL of the JSON Web Key Set used to verify JWT signatures.
 	// Defaults to ISSUER/.well-known/jwks.json.
 	JWKS string
+	// JWKSMinRefresh is the minimum time between fetches of the JWKS. A key
+	// set refresh within this time of the previous fetch is refused, and the
+	// JWT is checked against the cached keys only. Must be greater than 0.
+	JWKSMinRefresh time.Duration
 	// Audience is the audience (aud) the JWT must contain. The audience is
 	// not checked if empty.
 	Audience string
@@ -64,17 +72,19 @@ type Server struct {
 
 	// metrics
 	requestDuration *prometheus.HistogramVec
+	jwksFetches     *prometheus.CounterVec
+	jwksSkipped     prometheus.Counter
 }
 
 // NewServer returns a Server for cfg. It returns an error if cfg is invalid.
 func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
-	jwks := cfg.JWKS
-	if jwks == "" {
+	jwksURL := cfg.JWKS
+	if jwksURL == "" {
 		u, err := url.JoinPath(cfg.Issuer, ".well-known/jwks.json")
 		if err != nil {
 			return nil, fmt.Errorf("creating JWKS URL from issuer: %w", err)
 		}
-		jwks = u
+		jwksURL = u
 	}
 
 	metricsPath := cfg.MetricsPath
@@ -86,7 +96,7 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		addr:        cfg.Listen,
 		metricsAddr: cfg.MetricsListen,
 		metricsPath: metricsPath,
-		jwks:        jwks,
+		jwks:        jwksURL,
 		logger:      slog.New(slog.DiscardHandler),
 		registry:    prometheus.NewRegistry(),
 	}
@@ -95,14 +105,38 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		o(s)
 	}
 
-	// set up jwt verifier; the key set ignores cancellation of its context
-	v, err := newVerifier(cfg, oidc.NewRemoteKeySet(context.Background(), jwks), s.logger)
+	// set up metrics
+	s.jwksFetches = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "jwt_agent_jwks_fetches_total",
+			Help: "JWKS fetches sent to the JWKS URL, by result. A response that is not a valid key set still counts as a success.",
+		},
+		[]string{"result"},
+	)
+	s.jwksSkipped = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "jwt_agent_jwks_fetches_skipped_total",
+			Help: "Key set refreshes not sent to the JWKS URL because the previous fetch was too recent.",
+		},
+	)
+	// export both results from the start
+	s.jwksFetches.WithLabelValues("success")
+	s.jwksFetches.WithLabelValues("error")
+
+	// set up jwt verifier
+	transport, err := jwks.NewTransport(cfg.JWKSMinRefresh,
+		jwks.WithLogger(s.logger),
+		jwks.WithMetrics(s.jwksFetches, s.jwksSkipped),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating JWKS transport: %w", err)
+	}
+	v, err := newVerifier(cfg, newKeySet(jwksURL, transport), s.logger)
 	if err != nil {
 		return nil, err
 	}
 	s.verifier = v
 
-	// set up metrics
 	s.requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "jwt_agent_request_duration_seconds",
@@ -117,9 +151,21 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		s.requestDuration,
+		s.jwksFetches,
+		s.jwksSkipped,
 	)
 
 	return s, nil
+}
+
+// newKeySet returns a key set that fetches the JWKS from jwksURL with
+// transport, which limits how often a key set refresh reaches the JWKS URL.
+func newKeySet(jwksURL string, transport http.RoundTripper) oidc.KeySet {
+	client := &http.Client{Transport: transport, Timeout: jwksTimeout}
+
+	// the key set ignores cancellation of its context, which only carries
+	// the client
+	return oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), client), jwksURL)
 }
 
 // newVerifier returns the JWT verifier for cfg, checking signatures against keys.
