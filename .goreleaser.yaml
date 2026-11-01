@@ -19,7 +19,7 @@ builds:
     main: ./cmd/jwt-spoa
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      - -s -w -X main.Version={{ .Version }}
+      - -s -w -X github.com/andrewheberle/jwt-spoa/internal/version.Version={{ .Version }}
 
 archives:
   - ids:
