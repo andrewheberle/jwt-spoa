@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/andrewheberle/configger"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/spoa"
@@ -32,6 +33,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	f.String("jwt.aud", "", "Audience (aud) claim of the JWT's")
 	f.String("jwt.iss", "", "Issuer (iss) claim of the JWT's (required)")
 	f.String("jwt.jwks", "", "URL of JSON Web Key Set (JWKS) used to verify the JWT's (required)")
+	f.Duration("jwt.jwks-min-refresh", time.Minute, "Minimum time between fetches of the JWKS when a JWT fails signature verification")
 	f.StringSlice("jwt.claims", []string{"email"}, "Claims to extract (if present) from JWT's")
 	f.StringSlice("jwt.requiredclaims", []string{}, "Required claims to extract (if present) from JWT's")
 	f.Bool("debug", false, "Enable debug logging")
@@ -73,6 +75,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		Listen:         k.String("listen"),
 		Issuer:         k.String("jwt.iss"),
 		JWKS:           k.String("jwt.jwks"),
+		JWKSMinRefresh: k.Duration("jwt.jwks-min-refresh"),
 		Audience:       k.String("jwt.aud"),
 		Methods:        k.Strings("jwt.methods"),
 		Claims:         k.Strings("jwt.claims"),

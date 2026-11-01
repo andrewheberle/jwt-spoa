@@ -44,6 +44,21 @@ func TestExecute(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "zero JWKS minimum refresh is an error",
+			args:    append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.jwks-min-refresh", "0s"}, base...),
+			wantErr: true,
+		},
+		{
+			name:    "JWKS minimum refresh from the environment is used",
+			args:    append([]string{"--jwt.iss", "https://issuer.example.com"}, base...),
+			env:     map[string]string{"JWT_JWT_JWKS_MIN_REFRESH": "0s"},
+			wantErr: true,
+		},
+		{
+			name: "JWKS minimum refresh can be set",
+			args: append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.jwks-min-refresh", "30s"}, base...),
+		},
+		{
 			name: "valid configuration stops cleanly when context is cancelled",
 			args: append([]string{"--jwt.iss", "https://issuer.example.com"}, base...),
 		},

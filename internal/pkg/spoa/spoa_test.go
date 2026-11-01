@@ -23,14 +23,15 @@ const (
 )
 
 // newTestServer returns a Server for cfg whose verifier checks JWTs against
-// signer rather than a remote JWKS. Listen, Issuer, JWKS and Methods are
-// filled in.
+// signer rather than a remote JWKS. Listen, Issuer, JWKS, JWKSMinRefresh and
+// Methods are filled in.
 func newTestServer(t testing.TB, signer *verifytest.Signer, cfg Config) *Server {
 	t.Helper()
 
 	cfg.Listen = "127.0.0.1:0"
 	cfg.Issuer = testIssuer
 	cfg.JWKS = "http://127.0.0.1:0/jwks.json"
+	cfg.JWKSMinRefresh = time.Minute
 	cfg.Methods = []string{"RS256"}
 
 	s, err := NewServer(cfg)
@@ -178,6 +179,14 @@ func TestServer_metricsHelp(t *testing.T) {
 			name: "jwt_agent_request_duration_seconds",
 			help: "Latency of request handling by the JWT verification agent.",
 		},
+		{
+			name: "jwt_agent_jwks_fetches_total",
+			help: "JWKS fetches sent to the JWKS URL, by result. A response that is not a valid key set still counts as a success.",
+		},
+		{
+			name: "jwt_agent_jwks_fetches_skipped_total",
+			help: "Key set refreshes not sent to the JWKS URL because the previous fetch was too recent.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -204,35 +213,46 @@ func TestNewServer(t *testing.T) {
 		{
 			name: "explicit JWKS is used",
 			cfg: Config{
-				Issuer:  testIssuer,
-				JWKS:    "https://keys.example.com/jwks.json",
-				Methods: []string{"RS256"},
+				Issuer:         testIssuer,
+				JWKS:           "https://keys.example.com/jwks.json",
+				JWKSMinRefresh: time.Minute,
+				Methods:        []string{"RS256"},
 			},
 			wantJWKS: "https://keys.example.com/jwks.json",
 		},
 		{
 			name:     "empty JWKS defaults from issuer",
-			cfg:      Config{Issuer: testIssuer, Methods: []string{"RS256"}},
+			cfg:      Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}},
 			wantJWKS: testIssuer + "/.well-known/jwks.json",
 		},
 		{
 			name:     "issuer with trailing slash gives a clean JWKS URL",
-			cfg:      Config{Issuer: testIssuer + "/", Methods: []string{"RS256"}},
+			cfg:      Config{Issuer: testIssuer + "/", JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}},
 			wantJWKS: testIssuer + "/.well-known/jwks.json",
 		},
 		{
 			name:    "issuer that is not a URL is an error when JWKS is empty",
-			cfg:     Config{Issuer: "%zz", Methods: []string{"RS256"}},
+			cfg:     Config{Issuer: "%zz", JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}},
 			wantErr: true,
 		},
 		{
 			name:    "empty issuer is an error",
-			cfg:     Config{JWKS: "https://keys.example.com/jwks.json", Methods: []string{"RS256"}},
+			cfg:     Config{JWKS: "https://keys.example.com/jwks.json", JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}},
 			wantErr: true,
 		},
 		{
 			name:    "empty methods is an error",
-			cfg:     Config{Issuer: testIssuer},
+			cfg:     Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute},
+			wantErr: true,
+		},
+		{
+			name:    "zero JWKS minimum refresh is an error",
+			cfg:     Config{Issuer: testIssuer, Methods: []string{"RS256"}},
+			wantErr: true,
+		},
+		{
+			name:    "negative JWKS minimum refresh is an error",
+			cfg:     Config{Issuer: testIssuer, JWKSMinRefresh: -time.Second, Methods: []string{"RS256"}},
 			wantErr: true,
 		},
 	}
@@ -260,6 +280,7 @@ func newRunServer(t *testing.T, cfg Config) *Server {
 
 	cfg.Issuer = testIssuer
 	cfg.JWKS = "http://127.0.0.1:0/jwks.json"
+	cfg.JWKSMinRefresh = time.Minute
 	cfg.Methods = []string{"RS256"}
 
 	s, err := NewServer(cfg)

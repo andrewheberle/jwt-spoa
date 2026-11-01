@@ -20,6 +20,10 @@ _Avoid_: mandatory claim
 A claim converted to a type HAProxy can hold: a boolean, an integer, or a string (compact JSON for arrays and objects).
 _Avoid_: claim data
 
+**Key set refresh**:
+Fetching the JWKS again from the JWKS URL after a JWT fails signature verification against the cached keys, in case the keys have rotated. Limited to one fetch per `jwt.jwks-min-refresh`.
+_Avoid_: reload, rotate, sync
+
 **Native verification**:
 Checking a JWT inside HAProxy using only its `jwt_header_query`, `jwt_payload_query` and `jwt_verify` converters, with no SPOA.
 _Avoid_: native fetches, builtin, built-in JWT handling
