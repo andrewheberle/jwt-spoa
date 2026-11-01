@@ -1,0 +1,54 @@
+global
+  log stderr format raw local0 err
+
+defaults
+  log  global
+  mode http
+
+  timeout connect 5s
+  timeout client  30s
+  timeout server  30s
+
+# native verification, as in the README
+frontend fe_native
+  bind {{ .NativeAddr }}
+
+  http-request reject unless { http_auth_bearer -m found }
+  http-request set-var(txn.jwt) http_auth_bearer
+  http-request set-var(txn.jwt_alg) var(txn.jwt),jwt_header_query('$.alg')
+  http-request deny unless { var(txn.jwt_alg) -m str "RS256" }
+  http-request set-var(txn.jwt_iss) var(txn.jwt),jwt_payload_query('$.iss')
+  http-request deny unless { var(txn.jwt_iss) -m str "{{ .Issuer }}" }
+  http-request set-var(txn.jwt_aud) var(txn.jwt),jwt_payload_query('$.aud')
+  http-request deny unless { var(txn.jwt_aud) -m reg \[\"{{ .Audience }}\"\] }
+  http-request set-var(txn.jwt_exp) var(txn.jwt),jwt_payload_query('$.exp','int')
+  http-request set-var(txn.now) date
+  http-request deny if { var(txn.jwt_exp),sub(txn.now) lt 0 }
+  http-request deny unless { var(txn.jwt),jwt_verify(txn.jwt_alg,"{{ .KeyPath }}") 1 }
+  http-request deny unless { var(txn.jwt),jwt_payload_query('$.email') -m found }
+  http-request set-var(txn.jwt.claims.email) var(txn.jwt),jwt_payload_query('$.email')
+
+  default_backend be_ok
+
+# verification by the SPOA, as in the README
+frontend fe_spoa
+  bind {{ .SPOAAddr }}
+
+  http-request reject unless { http_auth_bearer -m found }
+  http-request set-var(txn.jwt) http_auth_bearer
+  filter spoe engine jwt config {{ .SPOEConfigPath }}
+  http-request send-spoe-group jwt verify
+  http-request deny unless { var(txn.jwt.jwt_valid) -m bool 1 }
+
+  default_backend be_ok
+
+backend be_ok
+  http-request return status 200 content-type text/plain lf-string "Email: %[var(txn.jwt.claims.email)]\n"
+
+backend be_spoe
+  mode tcp
+
+  timeout connect 5s
+  timeout server  5m
+
+  server spoa {{ .AgentAddr }}
