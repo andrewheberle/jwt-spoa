@@ -25,7 +25,7 @@ const (
 // newTestServer returns a Server for cfg whose verifier checks JWTs against
 // signer rather than a remote JWKS. Listen, Issuer, JWKS and Methods are
 // filled in.
-func newTestServer(t *testing.T, signer *verifytest.Signer, cfg Config) *Server {
+func newTestServer(t testing.TB, signer *verifytest.Signer, cfg Config) *Server {
 	t.Helper()
 
 	cfg.Listen = "127.0.0.1:0"
@@ -471,4 +471,60 @@ func waitServing(t *testing.T, ml net.Listener) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("metrics listener never served")
+}
+
+func BenchmarkServer_handler(b *testing.B) {
+	signer := verifytest.NewSigner(b)
+	other := verifytest.NewSigner(b)
+
+	claims := func(exp time.Duration, extra map[string]any) map[string]any {
+		c := map[string]any{
+			"iss": testIssuer,
+			"aud": testAudience,
+			"exp": time.Now().Add(exp).Unix(),
+		}
+		for k, v := range extra {
+			c[k] = v
+		}
+		return c
+	}
+	email := map[string]any{"email": "user@example.com"}
+
+	s := newTestServer(b, signer, Config{
+		Audience:       testAudience,
+		Claims:         []string{"email"},
+		RequiredClaims: []string{"email"},
+	})
+
+	benchmarks := []struct {
+		name      string
+		jwt       string
+		wantValid bool
+	}{
+		{name: "jwt=valid", jwt: signer.Sign(b, claims(time.Hour, email)), wantValid: true},
+		{name: "jwt=badsig", jwt: other.Sign(b, claims(time.Hour, email))},
+		{name: "jwt=expired", jwt: signer.Sign(b, claims(-time.Hour, email))},
+		{name: "jwt=missingclaim", jwt: signer.Sign(b, claims(time.Hour, nil))},
+		{name: "jwt=malformed", jwt: "not-a-jwt"},
+	}
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			ctx := context.Background()
+
+			// make sure the benchmark measures the outcome it is named for
+			req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
+			s.handler(ctx, req)
+			want := setVar("jwt_valid", bm.wantValid)
+			if got := req.Actions[len(req.Actions)-1]; !reflect.DeepEqual(got, want) {
+				b.Fatalf("handler() last action = %#v, want %#v", got, want)
+			}
+			request.ReleaseRequest(req)
+
+			for b.Loop() {
+				req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
+				s.handler(ctx, req)
+				request.ReleaseRequest(req)
+			}
+		})
+	}
 }

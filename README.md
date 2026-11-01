@@ -70,11 +70,6 @@ spoe-agent jwt
     use-backend be_spoe
 
 spoe-message jwt-verify
-    args jwt=var(txn.jwt)
-
-spoe-group verify
-    messages jwt-verify
-
     # Pass the JWT to the SPOA
     args jwt=var(txn.jwt)
 
@@ -97,9 +92,10 @@ If any claims specified as required are not found (or cannot be converted to a
 supported type) then the JWT is treated as invalid, `txn.PREFIX.jwt_valid` is
 returned as `false` and no claims are returned.
 
-### What About Native JWT Fetches?
+### What About Native Verification?
 
-HAProxy has supported verifying and parsing JWT's since v2.5 onwards which
+HAProxy has supported verifying and parsing JWT's since v2.5 onwards using its
+`jwt_header_query`, `jwt_payload_query` and `jwt_verify` converters, which
 requires no external service as is the case with this solution, however
 this approach has some limitations as follows:
 
@@ -107,18 +103,18 @@ this approach has some limitations as follows:
 2. The certificates used to verify the JWT must be fetched and updated via
    HAProxy's management API or available on disk, so external scripts/tooling
    is still required
-3. Only the signature of the JWT is verified by the `jwt_verify` fetch method
+3. Only the signature of the JWT is verified by the `jwt_verify` converter
 4. Verification of the issuer, audience, algorithm and expiry must be
-   performed via additional ACLs/fetches
-5. Claim extraction is via additional fetches
+   performed via additional ACLs/converters
+5. Claim extraction is via additional converters
 
 As an example, the following two front end configurations are functionally
-equivalent, however the built-in JWT handling requires significantly more
+equivalent, however native verification requires significantly more
 configuration and the certificate used to verify the JWT to have been
 downloaded and available in PEM format when HAProxy was started/reloaded:
 
 ```haproxy
-frontend fe_builtin_jwt
+frontend fe_native_jwt
     # extract JWT from request (reject if not found)
     http-request reject unless { http_auth_bearer -m found }
     http-request set-var(txn.jwt) http_auth_bearer
@@ -163,16 +159,39 @@ jwt:
 ```
 
 An important thing to note however is that despite the extra configuration,
-using the built-in JWT handling in HAProxy is much faster due to the lack of
-network overheads to handle the request via the SPOA so it depends on your
-workload.
+native verification is much faster as it avoids handing each request to the
+SPOA, so which to use depends on your workload.
 
-In basic tests of a thousand requests to both options from `localhost` gave
-results approximately 50% slower using this SPOA for JWT verification, however
-it should be noted that this meant P99 response times of 0.0134s for built-in
-JWT handling compared to P99 response times of 0.0382s using this SPOA, so
-depending on your workload and request volumes this may or may not be a
-problem.
+### Benchmarks
+
+The two frontends above are benchmarked against each other by sending
+requests through a local `haproxy` with both configured, with the SPOA and the
+JWKS it fetches running in the benchmark process:
+
+| JWT                 | Method | Time per request | P50 latency | P99 latency |
+|---------------------|--------|------------------|-------------|-------------|
+| Valid               | Native | 32.6µs           | 0.34ms      | 1.31ms      |
+| Valid               | SPOA   | 286µs            | 3.35ms      | 6.96ms      |
+| Invalid signature   | Native | 33.4µs           | 0.35ms      | 1.36ms      |
+| Invalid signature   | SPOA   | 397µs            | 4.63ms      | 8.49ms      |
+
+These are the medians of 10 runs, measured on 1 November 2026 with HAProxy
+3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. Time per request is
+from requests sent 12 at a time, so the latencies include time spent queued.
+
+The load generator, HAProxy and the SPOA all share the same CPUs, which costs
+the SPOA more than native verification as it is an extra process doing work.
+A JWT with an invalid signature also costs the SPOA more than a valid one, as
+its key set is fetched again from the JWKS URL in case the keys have changed.
+
+To run the benchmarks, with `haproxy` on your `PATH` (or set `HAPROXY_BIN` to
+its location) and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
+installed:
+
+```sh
+go test -tags bench -run '^$' -bench . -count 10 ./internal/benchmark | tee bench.txt
+benchstat -col /method bench.txt
+```
 
 ## Configuration
 

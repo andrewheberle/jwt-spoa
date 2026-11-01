@@ -19,3 +19,7 @@ _Avoid_: mandatory claim
 **Claim value**:
 A claim converted to a type HAProxy can hold: a boolean, an integer, or a string (compact JSON for arrays and objects).
 _Avoid_: claim data
+
+**Native verification**:
+Checking a JWT inside HAProxy using only its `jwt_header_query`, `jwt_payload_query` and `jwt_verify` converters, with no SPOA.
+_Avoid_: native fetches, builtin, built-in JWT handling
