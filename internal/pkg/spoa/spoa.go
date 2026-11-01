@@ -201,6 +201,7 @@ func (s *Server) run(ctx context.Context, l, ml net.Listener) error {
 	var err error
 	select {
 	case <-ctx.Done():
+		s.logger.Info("stopping")
 	case err = <-errs:
 		running--
 	}
