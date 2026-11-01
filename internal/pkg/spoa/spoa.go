@@ -2,15 +2,16 @@ package spoa
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"slices"
 	"time"
 
+	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/negasus/haproxy-spoe-go/action"
 	"github.com/negasus/haproxy-spoe-go/agent"
@@ -25,19 +26,16 @@ const (
 )
 
 type Server struct {
-	addr           string
-	logger         *slog.Logger
-	registry       *prometheus.Registry
-	claims         []string
-	requiredClaims []string
+	addr     string
+	logger   *slog.Logger
+	registry *prometheus.Registry
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	// jwt verification
-	config   *oidc.Config
-	keyset   *oidc.RemoteKeySet
-	verifier *oidc.IDTokenVerifier
+	verifyOpts []verify.Option
+	verifier   *verify.Verifier
 
 	// metrics
 	requestDuration *prometheus.HistogramVec
@@ -47,15 +45,11 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Server{
-		addr:           addr,
-		logger:         slog.New(slog.DiscardHandler),
-		registry:       prometheus.NewRegistry(),
-		claims:         make([]string, 0),
-		requiredClaims: make([]string, 0),
-		ctx:            ctx,
-		cancel:         cancel,
-		keyset:         oidc.NewRemoteKeySet(ctx, jwks),
-		config:         &oidc.Config{},
+		addr:     addr,
+		logger:   slog.New(slog.DiscardHandler),
+		registry: prometheus.NewRegistry(),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	for _, o := range opts {
@@ -63,7 +57,7 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	}
 
 	// set up jwt verifier
-	s.verifier = oidc.NewVerifier(issuer, s.keyset, s.config)
+	s.verifier = verify.New(issuer, oidc.NewRemoteKeySet(ctx, jwks), append(s.verifyOpts, verify.WithLogger(s.logger))...)
 
 	// set up metrics
 	s.requestDuration = prometheus.NewHistogramVec(
@@ -165,40 +159,29 @@ func (s *Server) handler(req *request.Request) {
 	}()
 
 	// verify JWT
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*2)
 	defer cancel()
-	parsed, err := s.verifier.Verify(ctx, signed)
-	if err != nil {
-		status = "error"
-		logger.Error("could not verify JWT", "error", err)
-		return
+	claims, err := s.verifier.Verify(ctx, signed)
+
+	// set claim variables in claim order
+	names := slices.Sorted(maps.Keys(claims))
+	attrs := make([]slog.Attr, 0, len(names))
+	for _, name := range names {
+		attrs = append(attrs, slog.Any(name, claims[name]))
+		req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", name), claims[name])
 	}
 
-	// extract wanted claims and set variables
-	var all map[string]json.RawMessage
-	if err := parsed.Claims(&all); err != nil {
+	if err != nil {
 		status = "error"
-		logger.Error("could not parse JWT", "error", err)
-		return
-	}
-	attrs := make([]slog.Attr, 0)
-	for _, claim := range s.claims {
-		if v, ok := all[claim]; ok {
-			value, err := toValue(v)
-			if err != nil {
-				logger.Warn("problem converting claim value to a supported type", "claim", claim, "error", err)
-				continue
-			}
-			attrs = append(attrs, slog.Any(claim, value))
-			req.Actions.SetVar(action.ScopeTransaction, fmt.Sprintf("claims.%s", claim), value)
-		} else {
-			// check if missing claim was required
-			if slices.Contains(s.requiredClaims, claim) {
-				logger.Error("a required claim was missing", "claim", claim)
-				return
-			}
-			logger.Warn("an expected claim was missing", "claim", claim)
+		switch {
+		case errors.Is(err, verify.ErrMissingRequiredClaim):
+			logger.Error("a required claim was missing", "error", err)
+		case errors.Is(err, verify.ErrInvalidClaims):
+			logger.Error("could not parse JWT", "error", err)
+		default:
+			logger.Error("could not verify JWT", "error", err)
 		}
+		return
 	}
 
 	// mark JWT as valid
@@ -212,35 +195,4 @@ func (s *Server) handler(req *request.Request) {
 
 func (s *Server) Errorf(format string, args ...any) {
 	s.logger.Error(fmt.Sprintf(format, args...))
-}
-
-func toValue(raw json.RawMessage) (any, error) {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, err
-	}
-
-	switch t := v.(type) {
-	case bool:
-		return t, nil
-	case string:
-		return t, nil
-	case float64:
-		// JSON numbers decode as float64; convert to int if it's whole.
-		if t == float64(int64(t)) {
-			return int(t), nil
-		}
-		// non-whole number — Foo can't take a float, so decide:
-		// here we fall back to a string representation.
-		return fmt.Sprintf("%v", t), nil
-	case nil:
-		return "", nil // or however you want to represent null
-	default:
-		// array or object - re-marshal to a compact JSON string
-		b, err := json.Marshal(t)
-		if err != nil {
-			return nil, err
-		}
-		return string(b), nil
-	}
 }

@@ -2,8 +2,8 @@ package spoa
 
 import (
 	"log/slog"
-	"slices"
 
+	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -23,34 +23,24 @@ func WithRegistry(registry *prometheus.Registry) ServerOption {
 
 func WithAudience(aud string) ServerOption {
 	return func(s *Server) {
-		s.config.ClientID = aud
+		s.verifyOpts = append(s.verifyOpts, verify.WithAudience(aud))
 	}
 }
 
 func WithValidMethods(methods []string) ServerOption {
 	return func(s *Server) {
-		s.config.SupportedSigningAlgs = methods
+		s.verifyOpts = append(s.verifyOpts, verify.WithValidMethods(methods))
 	}
 }
 
 func WithClaims(claims []string) ServerOption {
 	return func(s *Server) {
-		// append to claims and ensure list is sorted and with no dupes
-		s.claims = append(s.claims, claims...)
-		slices.Sort(s.claims)
-		s.claims = slices.Compact(s.claims)
+		s.verifyOpts = append(s.verifyOpts, verify.WithClaims(claims))
 	}
 }
 
 func WithRequiredClaims(claims []string) ServerOption {
 	return func(s *Server) {
-		// append to requiredClaims and ensure list is sorted and with no dupes
-		s.requiredClaims = append(s.requiredClaims, claims...)
-		slices.Sort(s.requiredClaims)
-		s.requiredClaims = slices.Compact(s.requiredClaims)
-		// also append to claims and ensure list is sorted and with no dupes
-		s.claims = append(s.claims, claims...)
-		slices.Sort(s.claims)
-		s.claims = slices.Compact(s.claims)
+		s.verifyOpts = append(s.verifyOpts, verify.WithRequiredClaims(claims))
 	}
 }
