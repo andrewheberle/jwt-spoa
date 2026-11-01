@@ -145,3 +145,38 @@ func TestServer_handler(t *testing.T) {
 		})
 	}
 }
+
+func TestServer_metricsHelp(t *testing.T) {
+	s := newTestServer(t, verifytest.NewSigner(t))
+
+	// observe once so the histogram is gathered
+	s.requestDuration.WithLabelValues("success").Observe(0)
+
+	families, err := s.registry.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		help string
+	}{
+		{
+			name: "jwt_agent_request_duration_seconds",
+			help: "Latency of request handling by the JWT verification agent.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, f := range families {
+				if f.GetName() == tt.name {
+					if f.GetHelp() != tt.help {
+						t.Errorf("help = %q, want %q", f.GetHelp(), tt.help)
+					}
+					return
+				}
+			}
+			t.Fatalf("metric %s not registered", tt.name)
+		})
+	}
+}

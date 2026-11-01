@@ -63,7 +63,7 @@ func NewServer(addr string, jwks string, issuer string, opts ...ServerOption) (*
 	s.requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "jwt_agent_request_duration_seconds",
-			Help:    "Latency of request handling by the geoip lookup agent.",
+			Help:    "Latency of request handling by the JWT verification agent.",
 			Buckets: []float64{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05, .1, .25},
 		},
 		[]string{"status"},
