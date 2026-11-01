@@ -6,6 +6,16 @@ This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
 verify an incoming JWT and return the claims. It supports verifying the
 JWT against a JWKS URL only at this time.
 
+## Usage
+
+```sh
+docker run \
+    -e JWT_JWT_ISS="http://idp.example.com" \
+	-e JWT_JWT_AUD="expected-jwt-aud" \
+    -p 3000:3000 \
+	ghcr.io/andrewheberle/jwt-spoa:v0.3.1 # x-release-please-version
+```
+
 ## HAProxy Integration
 
 As this SPOA handles JSON Web Tokens (JWT's) this is only relevant for HTTP
@@ -203,7 +213,7 @@ All of the above command-line options can be provided as environment
 variables as follows:
 
 ```sh
-# Disable cache and enable metrics on port 9200
+# Set issuer and enable metrics on port 9200
 JWT_JWT_ISS="http://idp.example.com" JWT_METRICS_LISTEN=":9200" jwt-spoa
 ```
 
