@@ -13,37 +13,37 @@ based proxies.
 
 To integrate JWT handling, add the config to you HAProxy configuration:
 
-```
+```haproxy
 # An example HTTP frontend
 frontend fe_http
-	mode http
+    mode http
 
-	# set transaction level variable for SPOE config
-	http-request set-var(txn.jwt) req.hdr("your-jwt-header")
+    # set transaction level variable for SPOE config
+    http-request set-var(txn.jwt) req.hdr("your-jwt-header")
 
-	# send request to SPOE
-	filter spoe engine jwt config /etc/haproxy/spoe.cfg
-	http-request send-spoe-group jwt verify
+    # send request to SPOE
+    filter spoe engine jwt config /etc/haproxy/spoe.cfg
+    http-request send-spoe-group jwt verify
 
-	# deny access if JWT was not valid
-	acl jwt_valid var(txn.jwt.jwt_valid) -m bool true
-	http-request reject unless jwt_valid
+    # deny access if JWT was not valid
+    acl jwt_valid var(txn.jwt.jwt_valid) -m bool true
+    http-request reject unless jwt_valid
 
-	# add further request handling based on claims
+    # add further request handling based on claims
 
 # This is the backend for communication with the agent
 backend be_spoe
     mode tcp
 
-	timeout connect 5s
-	timeout server  5m
+    timeout connect 5s
+    timeout server  5m
 
-	server spoa 127.0.0.1:3000 check
+    server spoa 127.0.0.1:3000 check
 ```
 
 A dedicated SPOE configuration file must be created:
 
-```
+```haproxy
 [jwt]
 
 spoe-agent jwt
@@ -65,7 +65,7 @@ spoe-message jwt-verify
 spoe-group verify
     messages jwt-verify
 
-	# Pass the JWT to the SPOA
+    # Pass the JWT to the SPOA
     args jwt=var(txn.jwt)
 
 spoe-group verify
