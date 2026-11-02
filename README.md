@@ -165,19 +165,28 @@ SPOA, so which to use depends on your workload.
 ### Benchmarks
 
 The two frontends above are benchmarked against each other by sending
-requests through a local `haproxy` with both configured, with the SPOA and the
-JWKS it fetches running in the benchmark process:
+requests through a local `haproxy` with both configured, plus a second SPOA
+frontend whose agent has the [verification cache](#verification-cache)
+enabled. The SPOA agents and the JWKS they fetch run in the benchmark
+process:
 
-| JWT                 | Method | Time per request | P50 latency | P99 latency |
-|---------------------|--------|------------------|-------------|-------------|
-| Valid               | Native | 17.8µs           | 0.19ms      | 0.74ms      |
-| Valid               | SPOA   | 77.5µs           | 0.90ms      | 2.03ms      |
-| Invalid signature   | Native | 18.7µs           | 0.19ms      | 0.80ms      |
-| Invalid signature   | SPOA   | 89.1µs           | 1.02ms      | 2.21ms      |
+| JWT               | Method | Verification cache | Time per request | P50 latency | P99 latency |
+|-------------------|--------|--------------------|------------------|-------------|-------------|
+| Valid             | Native | -                  | 18.5µs           | 0.19ms      | 0.78ms      |
+| Valid             | SPOA   | Off                | 83.5µs           | 0.96ms      | 2.33ms      |
+| Valid             | SPOA   | On                 | 38.8µs           | 0.37ms      | 1.52ms      |
+| Invalid signature | Native | -                  | 20.8µs           | 0.21ms      | 0.89ms      |
+| Invalid signature | SPOA   | Off                | 115µs            | 1.33ms      | 2.88ms      |
+| Invalid signature | SPOA   | On                 | 119µs            | 1.37ms      | 3.11ms      |
 
 These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
 3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. Time per request is
 from requests sent 12 at a time, so the latencies include time spent queued.
+
+Every request in a run sends the same JWT, so the rows with the verification
+cache on are the best case. In practice the benefit depends on how many
+requests each client makes with the same JWT. JWTs with an invalid signature
+are never cached, so the cache does not change their cost.
 
 The load generator, HAProxy and the SPOA all share the same CPUs, which costs
 the SPOA more than native verification as it is an extra process doing work.
