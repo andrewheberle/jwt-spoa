@@ -30,9 +30,11 @@ const (
 
 // haproxyConfig holds the values for testdata/haproxy.cfg.tmpl.
 type haproxyConfig struct {
-	NativeAddr     string
-	SPOAAddr       string
-	AgentAddr      string
+	NativeAddr      string
+	SPOAAddr        string
+	CachedSPOAAddr  string
+	AgentAddr       string
+	CachedAgentAddr string
 	Issuer         string
 	Audience       string
 	KeyPath        string
@@ -71,8 +73,9 @@ func haproxyBin(b *testing.B) string {
 }
 
 // startAgent runs the SPOA on addr, checking JWTs against the key set
-// served by jwks, until the benchmark ends.
-func startAgent(b *testing.B, addr, jwks string) {
+// served by jwks, until the benchmark ends. The verification cache holds up
+// to cacheMaxEntries JWTs, and is disabled if 0.
+func startAgent(b *testing.B, addr, jwks string, cacheMaxEntries int) {
 	b.Helper()
 
 	s, err := spoa.NewServer(spoa.Config{
@@ -83,7 +86,9 @@ func startAgent(b *testing.B, addr, jwks string) {
 		Audience:       testAudience,
 		Methods:        []string{"RS256"},
 		Claims:         []string{"email"},
-		RequiredClaims: []string{"email"},
+		RequiredClaims:  []string{"email"},
+		CacheMaxEntries: cacheMaxEntries,
+		CacheMaxAge:     5 * time.Minute,
 	})
 	if err != nil {
 		b.Fatalf("NewServer() error = %v", err)
@@ -157,7 +162,7 @@ func startHAProxy(b *testing.B, cfg haproxyConfig, key []byte) {
 		}
 	})
 
-	for _, addr := range []string{cfg.NativeAddr, cfg.SPOAAddr} {
+	for _, addr := range []string{cfg.NativeAddr, cfg.SPOAAddr, cfg.CachedSPOAAddr} {
 		waitListening(b, addr, exited)
 	}
 }
@@ -227,13 +232,16 @@ func BenchmarkVerification(b *testing.B) {
 	b.Cleanup(jwks.Close)
 
 	cfg := haproxyConfig{
-		NativeAddr: freeAddr(b),
-		SPOAAddr:   freeAddr(b),
-		AgentAddr:  freeAddr(b),
-		Issuer:     testIssuer,
-		Audience:   testAudience,
+		NativeAddr:      freeAddr(b),
+		SPOAAddr:        freeAddr(b),
+		CachedSPOAAddr:  freeAddr(b),
+		AgentAddr:       freeAddr(b),
+		CachedAgentAddr: freeAddr(b),
+		Issuer:          testIssuer,
+		Audience:        testAudience,
 	}
-	startAgent(b, cfg.AgentAddr, jwks.URL)
+	startAgent(b, cfg.AgentAddr, jwks.URL, 0)
+	startAgent(b, cfg.CachedAgentAddr, jwks.URL, 10000)
 	startHAProxy(b, cfg, signer.PublicKeyPEM(b))
 
 	// the native frontend matches the audience as a JSON array
@@ -250,12 +258,15 @@ func BenchmarkVerification(b *testing.B) {
 	}
 	b.Cleanup(client.CloseIdleConnections)
 
+	// native verification has no verification cache, so it only runs with
+	// cache=off
 	methods := []struct {
 		name string
 		addr string
 	}{
-		{name: "method=native", addr: cfg.NativeAddr},
-		{name: "method=spoa", addr: cfg.SPOAAddr},
+		{name: "cache=off/method=native", addr: cfg.NativeAddr},
+		{name: "cache=off/method=spoa", addr: cfg.SPOAAddr},
+		{name: "cache=on/method=spoa", addr: cfg.CachedSPOAAddr},
 	}
 	jwts := []struct {
 		name       string

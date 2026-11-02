@@ -43,7 +43,9 @@ func newTestServer(t testing.TB, signer *verifytest.Signer, cfg Config) *Server 
 	if err != nil {
 		t.Fatalf("newVerifier() error = %v", err)
 	}
-	s.verifier = v
+	if err := s.useVerifier(v); err != nil {
+		t.Fatalf("useVerifier() error = %v", err)
+	}
 
 	return s
 }
@@ -161,7 +163,7 @@ func TestServer_handler(t *testing.T) {
 }
 
 func TestServer_metricsHelp(t *testing.T) {
-	s := newTestServer(t, verifytest.NewSigner(t), Config{})
+	s := newTestServer(t, verifytest.NewSigner(t), Config{CacheMaxEntries: 10, CacheMaxAge: time.Minute})
 
 	// observe once so the histogram is gathered
 	s.requestDuration.WithLabelValues("success").Observe(0)
@@ -187,6 +189,18 @@ func TestServer_metricsHelp(t *testing.T) {
 			name: "jwt_agent_jwks_fetches_skipped_total",
 			help: "Key set refreshes not sent to the JWKS URL because the previous fetch was too recent.",
 		},
+		{
+			name: "jwt_agent_verification_cache_lookups_total",
+			help: "Verification cache lookups, by result. A lookup that finds an expired entry is a miss.",
+		},
+		{
+			name: "jwt_agent_verification_cache_evictions_total",
+			help: "Entries removed from the verification cache, by reason.",
+		},
+		{
+			name: "jwt_agent_verification_cache_entries",
+			help: "JWTs held in the verification cache.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,6 +213,109 @@ func TestServer_metricsHelp(t *testing.T) {
 				}
 			}
 			t.Fatalf("metric %s not registered", tt.name)
+		})
+	}
+}
+
+func TestServer_cacheMetricsRegistered(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        Config
+		registered bool
+	}{
+		{name: "cache enabled", cfg: Config{CacheMaxEntries: 10, CacheMaxAge: time.Minute}, registered: true},
+		{name: "cache disabled", cfg: Config{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestServer(t, verifytest.NewSigner(t), tt.cfg)
+
+			families, err := s.registry.Gather()
+			if err != nil {
+				t.Fatalf("Gather() error = %v", err)
+			}
+
+			found := false
+			for _, f := range families {
+				if strings.HasPrefix(f.GetName(), "jwt_agent_verification_cache_") {
+					found = true
+				}
+			}
+			if found != tt.registered {
+				t.Errorf("verification cache metrics registered = %v, want %v", found, tt.registered)
+			}
+		})
+	}
+}
+
+// countingVerifier counts the calls to the verifier it wraps.
+type countingVerifier struct {
+	next  verifier
+	calls int
+}
+
+func (c *countingVerifier) Verify(ctx context.Context, signed string) (map[string]any, error) {
+	c.calls++
+	return c.next.Verify(ctx, signed)
+}
+
+func TestServer_handler_cache(t *testing.T) {
+	signer := verifytest.NewSigner(t)
+	jwt := signer.Sign(t, map[string]any{
+		"iss":   testIssuer,
+		"aud":   testAudience,
+		"exp":   time.Now().Add(time.Hour).Unix(),
+		"email": "user@example.com",
+	})
+	want := action.Actions{
+		setVar("claims.email", "user@example.com"),
+		setVar("jwt_valid", true),
+	}
+
+	tests := []struct {
+		name      string
+		cfg       Config
+		wantCalls int
+	}{
+		{
+			name:      "cache enabled verifies a repeated JWT once",
+			cfg:       Config{Audience: testAudience, Claims: []string{"email"}, CacheMaxEntries: 10, CacheMaxAge: time.Minute},
+			wantCalls: 1,
+		},
+		{
+			name:      "cache disabled verifies a repeated JWT every time",
+			cfg:       Config{Audience: testAudience, Claims: []string{"email"}},
+			wantCalls: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestServer(t, signer, tt.cfg)
+
+			cfg := tt.cfg
+			cfg.Issuer = testIssuer
+			cfg.Methods = []string{"RS256"}
+			v, err := newVerifier(cfg, signer.KeySet(), s.logger)
+			if err != nil {
+				t.Fatalf("newVerifier() error = %v", err)
+			}
+			counter := &countingVerifier{next: v}
+			if err := s.useVerifier(counter); err != nil {
+				t.Fatalf("useVerifier() error = %v", err)
+			}
+
+			for i := range 3 {
+				req := newRequest(MessageName, map[string]any{"jwt": jwt})
+				s.handler(context.Background(), req)
+				if !reflect.DeepEqual(req.Actions, want) {
+					t.Errorf("request %d: handler() actions = %#v, want %#v", i, req.Actions, want)
+				}
+				request.ReleaseRequest(req)
+			}
+
+			if counter.calls != tt.wantCalls {
+				t.Errorf("verifier calls = %d, want %d", counter.calls, tt.wantCalls)
+			}
 		})
 	}
 }
@@ -253,6 +370,26 @@ func TestNewServer(t *testing.T) {
 		{
 			name:    "negative JWKS minimum refresh is an error",
 			cfg:     Config{Issuer: testIssuer, JWKSMinRefresh: -time.Second, Methods: []string{"RS256"}},
+			wantErr: true,
+		},
+		{
+			name:     "enabled verification cache",
+			cfg:      Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}, CacheMaxEntries: 10, CacheMaxAge: time.Minute},
+			wantJWKS: testIssuer + "/.well-known/jwks.json",
+		},
+		{
+			name:     "disabled verification cache ignores its maximum age",
+			cfg:      Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}, CacheMaxEntries: 0},
+			wantJWKS: testIssuer + "/.well-known/jwks.json",
+		},
+		{
+			name:    "negative verification cache entries is an error",
+			cfg:     Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}, CacheMaxEntries: -1, CacheMaxAge: time.Minute},
+			wantErr: true,
+		},
+		{
+			name:    "zero verification cache maximum age is an error when enabled",
+			cfg:     Config{Issuer: testIssuer, JWKSMinRefresh: time.Minute, Methods: []string{"RS256"}, CacheMaxEntries: 10},
 			wantErr: true,
 		},
 	}
@@ -511,12 +648,6 @@ func BenchmarkServer_handler(b *testing.B) {
 	}
 	email := map[string]any{"email": "user@example.com"}
 
-	s := newTestServer(b, signer, Config{
-		Audience:       testAudience,
-		Claims:         []string{"email"},
-		RequiredClaims: []string{"email"},
-	})
-
 	benchmarks := []struct {
 		name      string
 		jwt       string
@@ -528,23 +659,43 @@ func BenchmarkServer_handler(b *testing.B) {
 		{name: "jwt=missingclaim", jwt: signer.Sign(b, claims(time.Hour, nil))},
 		{name: "jwt=malformed", jwt: "not-a-jwt"},
 	}
-	for _, bm := range benchmarks {
-		b.Run(bm.name, func(b *testing.B) {
-			ctx := context.Background()
+	caches := []struct {
+		name       string
+		maxEntries int
+	}{
+		{name: "cache=off"},
+		{name: "cache=on", maxEntries: 10000},
+	}
+	for _, c := range caches {
+		b.Run(c.name, func(b *testing.B) {
+			s := newTestServer(b, signer, Config{
+				Audience:        testAudience,
+				Claims:          []string{"email"},
+				RequiredClaims:  []string{"email"},
+				CacheMaxEntries: c.maxEntries,
+				CacheMaxAge:     5 * time.Minute,
+			})
 
-			// make sure the benchmark measures the outcome it is named for
-			req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
-			s.handler(ctx, req)
-			want := setVar("jwt_valid", bm.wantValid)
-			if got := req.Actions[len(req.Actions)-1]; !reflect.DeepEqual(got, want) {
-				b.Fatalf("handler() last action = %#v, want %#v", got, want)
-			}
-			request.ReleaseRequest(req)
+			for _, bm := range benchmarks {
+				b.Run(bm.name, func(b *testing.B) {
+					ctx := context.Background()
 
-			for b.Loop() {
-				req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
-				s.handler(ctx, req)
-				request.ReleaseRequest(req)
+					// make sure the benchmark measures the outcome it is named
+					// for; with the cache on, this also caches a valid JWT
+					req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
+					s.handler(ctx, req)
+					want := setVar("jwt_valid", bm.wantValid)
+					if got := req.Actions[len(req.Actions)-1]; !reflect.DeepEqual(got, want) {
+						b.Fatalf("handler() last action = %#v, want %#v", got, want)
+					}
+					request.ReleaseRequest(req)
+
+					for b.Loop() {
+						req := newRequest(MessageName, map[string]any{"jwt": bm.jwt})
+						s.handler(ctx, req)
+						request.ReleaseRequest(req)
+					}
+				})
 			}
 		})
 	}

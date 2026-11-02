@@ -42,6 +42,18 @@ frontend fe_spoa
 
   default_backend be_ok
 
+# verification by the SPOA with its verification cache enabled
+frontend fe_spoa_cached
+  bind {{ .CachedSPOAAddr }}
+
+  http-request reject unless { http_auth_bearer -m found }
+  http-request set-var(txn.jwt) http_auth_bearer
+  filter spoe engine jwt-cached config {{ .SPOEConfigPath }}
+  http-request send-spoe-group jwt-cached verify
+  http-request deny unless { var(txn.jwt.jwt_valid) -m bool 1 }
+
+  default_backend be_ok
+
 backend be_ok
   http-request return status 200 content-type text/plain lf-string "Email: %[var(txn.jwt.claims.email)]\n"
 
@@ -52,3 +64,11 @@ backend be_spoe
   timeout server  5m
 
   server spoa {{ .AgentAddr }}
+
+backend be_spoe_cached
+  mode tcp
+
+  timeout connect 5s
+  timeout server  5m
+
+  server spoa {{ .CachedAgentAddr }}

@@ -165,19 +165,51 @@ SPOA, so which to use depends on your workload.
 ### Benchmarks
 
 The two frontends above are benchmarked against each other by sending
-requests through a local `haproxy` with both configured, with the SPOA and the
-JWKS it fetches running in the benchmark process:
+requests through a local `haproxy` with both configured, plus a second SPOA
+frontend whose agent has the [verification cache](#verification-cache)
+enabled. The SPOA agents and the JWKS they fetch run in the benchmark
+process, and requests are sent as many at a time as the machine has CPU
+threads, so the latencies include time spent queued.
 
-| JWT                 | Method | Time per request | P50 latency | P99 latency |
-|---------------------|--------|------------------|-------------|-------------|
-| Valid               | Native | 17.8µs           | 0.19ms      | 0.74ms      |
-| Valid               | SPOA   | 77.5µs           | 0.90ms      | 2.03ms      |
-| Invalid signature   | Native | 18.7µs           | 0.19ms      | 0.80ms      |
-| Invalid signature   | SPOA   | 89.1µs           | 1.02ms      | 2.21ms      |
+On a virtual machine:
+
+| JWT               | Method | Verification cache | Time per request | P50 latency | P99 latency |
+|-------------------|--------|--------------------|------------------|-------------|-------------|
+| Valid             | Native | -                  | 112µs            | 0.39ms      | 1.74ms      |
+| Valid             | SPOA   | Off                | 238µs            | 0.85ms      | 2.80ms      |
+| Valid             | SPOA   | On                 | 160µs            | 0.58ms      | 2.11ms      |
+| Invalid signature | Native | -                  | 110µs            | 0.39ms      | 1.62ms      |
+| Invalid signature | SPOA   | Off                | 252µs            | 0.89ms      | 3.05ms      |
+| Invalid signature | SPOA   | On                 | 254µs            | 0.89ms      | 3.16ms      |
 
 These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
-3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. Time per request is
-from requests sent 12 at a time, so the latencies include time spent queued.
+3.2.26 and Go 1.27.3 on an otherwise idle Ubuntu 24.04 VM with 4 vCPUs of an
+Intel Xeon E5-2618L v3.
+
+On a laptop:
+
+| JWT               | Method | Verification cache | Time per request | P50 latency | P99 latency |
+|-------------------|--------|--------------------|------------------|-------------|-------------|
+| Valid             | Native | -                  | 18.5µs           | 0.19ms      | 0.78ms      |
+| Valid             | SPOA   | Off                | 83.5µs           | 0.96ms      | 2.33ms      |
+| Valid             | SPOA   | On                 | 38.8µs           | 0.37ms      | 1.52ms      |
+| Invalid signature | Native | -                  | 20.8µs           | 0.21ms      | 0.89ms      |
+| Invalid signature | SPOA   | Off                | 115µs            | 1.33ms      | 2.88ms      |
+| Invalid signature | SPOA   | On                 | 119µs            | 1.37ms      | 3.11ms      |
+
+These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
+3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. The laptop lowers
+its clock speed under sustained load, so its figures vary more between runs,
+especially for invalid signatures.
+
+How much the SPOA costs compared with native verification depends heavily on
+the hardware: about 2.1× on the VM and 4.5× on the laptop with the
+verification cache off, and about 1.4× and 2.1× with it on.
+
+Every request in a run sends the same JWT, so the rows with the verification
+cache on are the best case. In practice the benefit depends on how many
+requests each client makes with the same JWT. JWTs with an invalid signature
+are never cached, so the cache does not change their cost.
 
 The load generator, HAProxy and the SPOA all share the same CPUs, which costs
 the SPOA more than native verification as it is an extra process doing work.
@@ -208,22 +240,24 @@ options from lower levels:
 
 The following command line options are supported:
 
-| Option               | Type       | Default                        | Description                                                        |
-|----------------------|------------|--------------------------------|--------------------------------------------------------------------|
-| config               | `string`   |                                | Path to YAML configuration file                                    |
-| debug                | `boolean`  | `false`                        | Enable debug logging                                               |
-| jwt.aud              | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty |
-| jwt.claims           | `[]string` | `["email"]`                    | Claims to extract from JWT's                                       |
-| jwt.requiredclaims   | `[]string` |                                | Required claims to extract from JWT's                              |
-| jwt.iss              | `string`   |                                | Issuer (iss) claim of the JWT's (required)                         |
-| jwt.jwks             | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                |
-| jwt.jwks-min-refresh | `duration` | `1m`                           | Minimum time between JWKS fetches; must be greater than 0          |
-| jwt.methods          | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                          |
-| listen               | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                |
-| logger.type          | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                          |
-| metrics.listen       | `string`   |                                | Listen address for Prometheus metrics                              |
-| metrics.path         | `string`   | `/metrics`                     | Path for Prometheus metrics                                        |
-| version              | `boolean`  | `false`                        | Show version and exit                                              |
+| Option                | Type       | Default                        | Description                                                                  |
+|-----------------------|------------|--------------------------------|------------------------------------------------------------------------------|
+| config                | `string`   |                                | Path to YAML configuration file                                              |
+| debug                 | `boolean`  | `false`                        | Enable debug logging                                                         |
+| jwt.aud               | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty           |
+| jwt.cache-max-age     | `duration` | `5m`                           | Maximum time a JWT is held in the verification cache; must be greater than 0 |
+| jwt.cache-max-entries | `int`      | `10000`                        | Maximum JWT's held in the verification cache; `0` disables the cache         |
+| jwt.claims            | `[]string` | `["email"]`                    | Claims to extract from JWT's                                                 |
+| jwt.requiredclaims    | `[]string` |                                | Required claims to extract from JWT's                                        |
+| jwt.iss               | `string`   |                                | Issuer (iss) claim of the JWT's (required)                                   |
+| jwt.jwks              | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                          |
+| jwt.jwks-min-refresh  | `duration` | `1m`                           | Minimum time between JWKS fetches; must be greater than 0                    |
+| jwt.methods           | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                                    |
+| listen                | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                          |
+| logger.type           | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                                    |
+| metrics.listen        | `string`   |                                | Listen address for Prometheus metrics                                        |
+| metrics.path          | `string`   | `/metrics`                     | Path for Prometheus metrics                                                  |
+| version               | `boolean`  | `false`                        | Show version and exit                                                        |
 
 ### Environment
 
@@ -274,6 +308,35 @@ Two Prometheus metrics show this activity:
 
 An `error` is a failed request or a response other than `200 OK`. A response
 that is not a valid key set still counts as a `success`.
+
+## Verification Cache
+
+Verifying a JWT is most of the work the SPOA does for each request, and
+clients normally send the same JWT on many requests until it expires. The
+verification cache remembers the claim values of each JWT that passed
+verification, so a repeat request with the same JWT is answered without
+verifying it again. JWTs that fail verification are never cached.
+
+An entry lives until the earlier of the JWT's expiry (`exp`) and
+`jwt.cache-max-age` (default `5m`), and the cache holds at most
+`jwt.cache-max-entries` JWTs (default `10000`, about 3 to 5MB), evicting the
+least recently used when full. Entries are keyed by a SHA-256 hash of the
+JWT, so the cache holds no usable tokens. Set `jwt.cache-max-entries` to `0`
+to disable the cache.
+
+The trade-off is that a cached JWT keeps passing for up to
+`jwt.cache-max-age` after its signing key is withdrawn from the JWKS. Even
+without the cache a withdrawn key keeps working until the next
+[key set refresh](#key-set-refresh), so lower `jwt.cache-max-age` if you need
+withdrawn keys to take effect sooner.
+
+When the cache is enabled, three Prometheus metrics show its activity:
+
+| Metric                                         | Type      | Description                                                                       |
+|------------------------------------------------|-----------|-----------------------------------------------------------------------------------|
+| `jwt_agent_verification_cache_lookups_total`   | `counter` | Lookups, labelled `result` of `hit` or `miss`; finding an expired entry is a miss |
+| `jwt_agent_verification_cache_evictions_total` | `counter` | Entries removed, labelled `reason` of `capacity` or `expired`                     |
+| `jwt_agent_verification_cache_entries`         | `gauge`   | JWTs held in the cache                                                            |
 
 ## Shutdown
 

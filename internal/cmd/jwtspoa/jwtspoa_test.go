@@ -59,6 +59,26 @@ func TestExecute(t *testing.T) {
 			args: append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.jwks-min-refresh", "30s"}, base...),
 		},
 		{
+			name:    "negative verification cache entries is an error",
+			args:    append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.cache-max-entries", "-1"}, base...),
+			wantErr: true,
+		},
+		{
+			name:    "zero verification cache maximum age is an error",
+			args:    append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.cache-max-age", "0s"}, base...),
+			wantErr: true,
+		},
+		{
+			name:    "verification cache maximum age from the environment is used",
+			args:    append([]string{"--jwt.iss", "https://issuer.example.com"}, base...),
+			env:     map[string]string{"JWT_JWT_CACHE_MAX_AGE": "0s"},
+			wantErr: true,
+		},
+		{
+			name: "verification cache can be disabled",
+			args: append([]string{"--jwt.iss", "https://issuer.example.com", "--jwt.cache-max-entries", "0", "--jwt.cache-max-age", "0s"}, base...),
+		},
+		{
 			name: "valid configuration stops cleanly when context is cancelled",
 			args: append([]string{"--jwt.iss", "https://issuer.example.com"}, base...),
 		},
