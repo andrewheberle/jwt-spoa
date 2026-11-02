@@ -170,21 +170,17 @@ JWKS it fetches running in the benchmark process:
 
 | JWT                 | Method | Time per request | P50 latency | P99 latency |
 |---------------------|--------|------------------|-------------|-------------|
-| Valid               | Native | 32.6µs           | 0.34ms      | 1.31ms      |
-| Valid               | SPOA   | 286µs            | 3.35ms      | 6.96ms      |
-| Invalid signature   | Native | 33.4µs           | 0.35ms      | 1.36ms      |
-| Invalid signature   | SPOA   | 397µs            | 4.63ms      | 8.49ms      |
+| Valid               | Native | 17.8µs           | 0.19ms      | 0.74ms      |
+| Valid               | SPOA   | 77.5µs           | 0.90ms      | 2.03ms      |
+| Invalid signature   | Native | 18.7µs           | 0.19ms      | 0.80ms      |
+| Invalid signature   | SPOA   | 89.1µs           | 1.02ms      | 2.21ms      |
 
-These are the medians of 10 runs, measured on 1 November 2026 with HAProxy
+These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
 3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. Time per request is
 from requests sent 12 at a time, so the latencies include time spent queued.
 
 The load generator, HAProxy and the SPOA all share the same CPUs, which costs
 the SPOA more than native verification as it is an extra process doing work.
-These figures were measured before key set refreshes were limited (see
-[Key Set Refresh](#key-set-refresh)): each JWT with an invalid signature then
-fetched the key set again from the JWKS URL, which made it cost the SPOA more
-than a valid one.
 
 To run the benchmarks, with `haproxy` on your `PATH` (or set `HAPROXY_BIN` to
 its location) and [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat)
