@@ -14,6 +14,7 @@ import (
 
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/jwks"
 	"github.com/andrewheberle/jwt-spoa/internal/pkg/verify"
+	"github.com/andrewheberle/jwt-spoa/internal/pkg/verifycache"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/negasus/haproxy-spoe-go/action"
 	"github.com/negasus/haproxy-spoe-go/agent"
@@ -52,6 +53,14 @@ type Config struct {
 	Claims []string
 	// RequiredClaims are the claims that must be present.
 	RequiredClaims []string
+	// CacheMaxEntries is the most JWTs the verification cache holds. The
+	// cache is disabled if 0. Must not be negative.
+	CacheMaxEntries int
+	// CacheMaxAge is the longest a JWT stays in the verification cache,
+	// which also limits how long a cached JWT keeps passing after its
+	// signing key is withdrawn from the JWKS. Must be greater than 0 when
+	// the cache is enabled.
+	CacheMaxAge time.Duration
 	// MetricsListen is the address the Prometheus metrics listener listens
 	// on. No metrics listener is started if empty.
 	MetricsListen string
@@ -68,13 +77,28 @@ type Server struct {
 	registry    *prometheus.Registry
 
 	// jwt verification
-	verifier *verify.Verifier
+	verify          verifyFunc
+	cacheMaxEntries int
+	cacheMaxAge     time.Duration
 
 	// metrics
 	requestDuration *prometheus.HistogramVec
 	jwksFetches     *prometheus.CounterVec
 	jwksSkipped     prometheus.Counter
+	cacheLookups    *prometheus.CounterVec
+	cacheEvictions  *prometheus.CounterVec
+	cacheEntries    prometheus.Gauge
 }
+
+// verifier performs JWT verification, returning the claim values of a JWT
+// that passes.
+type verifier interface {
+	Verify(ctx context.Context, signed string) (map[string]any, error)
+}
+
+// verifyFunc performs JWT verification, also reporting whether the claim
+// values came from the verification cache.
+type verifyFunc func(ctx context.Context, signed string) (claims map[string]any, cached bool, err error)
 
 // NewServer returns a Server for cfg. It returns an error if cfg is invalid.
 func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
@@ -92,13 +116,19 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		metricsPath = "/metrics"
 	}
 
+	if cfg.CacheMaxEntries < 0 {
+		return nil, fmt.Errorf("maximum verification cache entries must not be negative, got %d", cfg.CacheMaxEntries)
+	}
+
 	s := &Server{
-		addr:        cfg.Listen,
-		metricsAddr: cfg.MetricsListen,
-		metricsPath: metricsPath,
-		jwks:        jwksURL,
-		logger:      slog.New(slog.DiscardHandler),
-		registry:    prometheus.NewRegistry(),
+		addr:            cfg.Listen,
+		metricsAddr:     cfg.MetricsListen,
+		metricsPath:     metricsPath,
+		jwks:            jwksURL,
+		cacheMaxEntries: cfg.CacheMaxEntries,
+		cacheMaxAge:     cfg.CacheMaxAge,
+		logger:          slog.New(slog.DiscardHandler),
+		registry:        prometheus.NewRegistry(),
 	}
 
 	for _, o := range opts {
@@ -122,6 +152,33 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 	// export both results from the start
 	s.jwksFetches.WithLabelValues("success")
 	s.jwksFetches.WithLabelValues("error")
+	if s.cacheMaxEntries > 0 {
+		s.cacheLookups = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "jwt_agent_verification_cache_lookups_total",
+				Help: "Verification cache lookups, by result. A lookup that finds an expired entry is a miss.",
+			},
+			[]string{"result"},
+		)
+		s.cacheEvictions = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "jwt_agent_verification_cache_evictions_total",
+				Help: "Entries removed from the verification cache, by reason.",
+			},
+			[]string{"reason"},
+		)
+		s.cacheEntries = prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "jwt_agent_verification_cache_entries",
+				Help: "JWTs held in the verification cache.",
+			},
+		)
+		// export every label value from the start
+		s.cacheLookups.WithLabelValues("hit")
+		s.cacheLookups.WithLabelValues("miss")
+		s.cacheEvictions.WithLabelValues("capacity")
+		s.cacheEvictions.WithLabelValues("expired")
+	}
 
 	// set up jwt verifier
 	transport, err := jwks.NewTransport(cfg.JWKSMinRefresh,
@@ -135,7 +192,9 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.verifier = v
+	if err := s.useVerifier(v); err != nil {
+		return nil, err
+	}
 
 	s.requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -154,8 +213,33 @@ func NewServer(cfg Config, opts ...ServerOption) (*Server, error) {
 		s.jwksFetches,
 		s.jwksSkipped,
 	)
+	if s.cacheMaxEntries > 0 {
+		s.registry.MustRegister(s.cacheLookups, s.cacheEvictions, s.cacheEntries)
+	}
 
 	return s, nil
+}
+
+// useVerifier sets v as the verifier for JWTs, behind the verification cache
+// when it is enabled.
+func (s *Server) useVerifier(v verifier) error {
+	if s.cacheMaxEntries == 0 {
+		s.verify = func(ctx context.Context, signed string) (map[string]any, bool, error) {
+			claims, err := v.Verify(ctx, signed)
+			return claims, false, err
+		}
+		return nil
+	}
+
+	c, err := verifycache.New(v, s.cacheMaxEntries, s.cacheMaxAge,
+		verifycache.WithMetrics(s.cacheLookups, s.cacheEvictions, s.cacheEntries),
+	)
+	if err != nil {
+		return fmt.Errorf("creating verification cache: %w", err)
+	}
+	s.verify = c.VerifyCached
+
+	return nil
 }
 
 // newKeySet returns a key set that fetches the JWKS from jwksURL with
@@ -312,7 +396,7 @@ func (s *Server) handler(ctx context.Context, req *request.Request) {
 	// verify JWT
 	ctx, cancel := context.WithTimeout(ctx, time.Second*2)
 	defer cancel()
-	claims, err := s.verifier.Verify(ctx, signed)
+	claims, cached, err := s.verify(ctx, signed)
 	if err != nil {
 		status = "error"
 		switch {
@@ -339,6 +423,7 @@ func (s *Server) handler(ctx context.Context, req *request.Request) {
 
 	logger.Debug("handled request",
 		"jwt_valid", jwtValid,
+		"cached", cached,
 		slog.GroupAttrs("claims", attrs...),
 	)
 }

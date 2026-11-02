@@ -208,22 +208,24 @@ options from lower levels:
 
 The following command line options are supported:
 
-| Option               | Type       | Default                        | Description                                                        |
-|----------------------|------------|--------------------------------|--------------------------------------------------------------------|
-| config               | `string`   |                                | Path to YAML configuration file                                    |
-| debug                | `boolean`  | `false`                        | Enable debug logging                                               |
-| jwt.aud              | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty |
-| jwt.claims           | `[]string` | `["email"]`                    | Claims to extract from JWT's                                       |
-| jwt.requiredclaims   | `[]string` |                                | Required claims to extract from JWT's                              |
-| jwt.iss              | `string`   |                                | Issuer (iss) claim of the JWT's (required)                         |
-| jwt.jwks             | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                |
-| jwt.jwks-min-refresh | `duration` | `1m`                           | Minimum time between JWKS fetches; must be greater than 0          |
-| jwt.methods          | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                          |
-| listen               | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                |
-| logger.type          | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                          |
-| metrics.listen       | `string`   |                                | Listen address for Prometheus metrics                              |
-| metrics.path         | `string`   | `/metrics`                     | Path for Prometheus metrics                                        |
-| version              | `boolean`  | `false`                        | Show version and exit                                              |
+| Option                | Type       | Default                        | Description                                                                  |
+|-----------------------|------------|--------------------------------|------------------------------------------------------------------------------|
+| config                | `string`   |                                | Path to YAML configuration file                                              |
+| debug                 | `boolean`  | `false`                        | Enable debug logging                                                         |
+| jwt.aud               | `string`   |                                | Audience (aud) expected for JWT verification; not checked if empty           |
+| jwt.cache-max-age     | `duration` | `5m`                           | Maximum time a JWT is held in the verification cache; must be greater than 0 |
+| jwt.cache-max-entries | `int`      | `10000`                        | Maximum JWT's held in the verification cache; `0` disables the cache         |
+| jwt.claims            | `[]string` | `["email"]`                    | Claims to extract from JWT's                                                 |
+| jwt.requiredclaims    | `[]string` |                                | Required claims to extract from JWT's                                        |
+| jwt.iss               | `string`   |                                | Issuer (iss) claim of the JWT's (required)                                   |
+| jwt.jwks              | `string`   | `ISSUER/.well-known/jwks.json` | JWKS URL (required)                                                          |
+| jwt.jwks-min-refresh  | `duration` | `1m`                           | Minimum time between JWKS fetches; must be greater than 0                    |
+| jwt.methods           | `[]string` | `["RS256"]`                    | Methods/algorithms to use to verify JWT's                                    |
+| listen                | `string`   | `127.0.0.1:3000`               | SPOA listen address                                                          |
+| logger.type           | `string`   | `auto`                         | Logger type (auto, systemd, json or text)                                    |
+| metrics.listen        | `string`   |                                | Listen address for Prometheus metrics                                        |
+| metrics.path          | `string`   | `/metrics`                     | Path for Prometheus metrics                                                  |
+| version               | `boolean`  | `false`                        | Show version and exit                                                        |
 
 ### Environment
 
@@ -274,6 +276,35 @@ Two Prometheus metrics show this activity:
 
 An `error` is a failed request or a response other than `200 OK`. A response
 that is not a valid key set still counts as a `success`.
+
+## Verification Cache
+
+Verifying a JWT is most of the work the SPOA does for each request, and
+clients normally send the same JWT on many requests until it expires. The
+verification cache remembers the claim values of each JWT that passed
+verification, so a repeat request with the same JWT is answered without
+verifying it again. JWTs that fail verification are never cached.
+
+An entry lives until the earlier of the JWT's expiry (`exp`) and
+`jwt.cache-max-age` (default `5m`), and the cache holds at most
+`jwt.cache-max-entries` JWTs (default `10000`, about 3 to 5MB), evicting the
+least recently used when full. Entries are keyed by a SHA-256 hash of the
+JWT, so the cache holds no usable tokens. Set `jwt.cache-max-entries` to `0`
+to disable the cache.
+
+The trade-off is that a cached JWT keeps passing for up to
+`jwt.cache-max-age` after its signing key is withdrawn from the JWKS. Even
+without the cache a withdrawn key keeps working until the next
+[key set refresh](#key-set-refresh), so lower `jwt.cache-max-age` if you need
+withdrawn keys to take effect sooner.
+
+When the cache is enabled, three Prometheus metrics show its activity:
+
+| Metric                                         | Type      | Description                                                                       |
+|------------------------------------------------|-----------|-----------------------------------------------------------------------------------|
+| `jwt_agent_verification_cache_lookups_total`   | `counter` | Lookups, labelled `result` of `hit` or `miss`; finding an expired entry is a miss |
+| `jwt_agent_verification_cache_evictions_total` | `counter` | Entries removed, labelled `reason` of `capacity` or `expired`                     |
+| `jwt_agent_verification_cache_entries`         | `gauge`   | JWTs held in the cache                                                            |
 
 ## Shutdown
 

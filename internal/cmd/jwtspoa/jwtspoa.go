@@ -36,6 +36,8 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	f.Duration("jwt.jwks-min-refresh", time.Minute, "Minimum time between fetches of the JWKS when a JWT fails signature verification")
 	f.StringSlice("jwt.claims", []string{"email"}, "Claims to extract (if present) from JWT's")
 	f.StringSlice("jwt.requiredclaims", []string{}, "Required claims to extract (if present) from JWT's")
+	f.Int("jwt.cache-max-entries", 10000, "Maximum JWT's held in the verification cache; 0 disables the cache")
+	f.Duration("jwt.cache-max-age", 5*time.Minute, "Maximum time a JWT is held in the verification cache")
 	f.Bool("debug", false, "Enable debug logging")
 	f.Bool("version", false, "Show version and exit")
 	f.Var(lt, "logger.type", "Logger type (auto, discard, json, systemd or text)")
@@ -72,16 +74,18 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 	// set up service
 	cfg := spoa.Config{
-		Listen:         k.String("listen"),
-		Issuer:         k.String("jwt.iss"),
-		JWKS:           k.String("jwt.jwks"),
-		JWKSMinRefresh: k.Duration("jwt.jwks-min-refresh"),
-		Audience:       k.String("jwt.aud"),
-		Methods:        k.Strings("jwt.methods"),
-		Claims:         k.Strings("jwt.claims"),
-		RequiredClaims: k.Strings("jwt.requiredclaims"),
-		MetricsListen:  k.String("metrics.listen"),
-		MetricsPath:    k.String("metrics.path"),
+		Listen:          k.String("listen"),
+		Issuer:          k.String("jwt.iss"),
+		JWKS:            k.String("jwt.jwks"),
+		JWKSMinRefresh:  k.Duration("jwt.jwks-min-refresh"),
+		Audience:        k.String("jwt.aud"),
+		Methods:         k.Strings("jwt.methods"),
+		Claims:          k.Strings("jwt.claims"),
+		RequiredClaims:  k.Strings("jwt.requiredclaims"),
+		CacheMaxEntries: k.Int("jwt.cache-max-entries"),
+		CacheMaxAge:     k.Duration("jwt.cache-max-age"),
+		MetricsListen:   k.String("metrics.listen"),
+		MetricsPath:     k.String("metrics.path"),
 	}
 	srv, err := spoa.NewServer(cfg, spoa.WithLogger(logger))
 	if err != nil {
