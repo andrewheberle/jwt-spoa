@@ -168,7 +168,25 @@ The two frontends above are benchmarked against each other by sending
 requests through a local `haproxy` with both configured, plus a second SPOA
 frontend whose agent has the [verification cache](#verification-cache)
 enabled. The SPOA agents and the JWKS they fetch run in the benchmark
-process:
+process, and requests are sent as many at a time as the machine has CPU
+threads, so the latencies include time spent queued.
+
+On a virtual machine:
+
+| JWT               | Method | Verification cache | Time per request | P50 latency | P99 latency |
+|-------------------|--------|--------------------|------------------|-------------|-------------|
+| Valid             | Native | -                  | 112µs            | 0.39ms      | 1.74ms      |
+| Valid             | SPOA   | Off                | 238µs            | 0.85ms      | 2.80ms      |
+| Valid             | SPOA   | On                 | 160µs            | 0.58ms      | 2.11ms      |
+| Invalid signature | Native | -                  | 110µs            | 0.39ms      | 1.62ms      |
+| Invalid signature | SPOA   | Off                | 252µs            | 0.89ms      | 3.05ms      |
+| Invalid signature | SPOA   | On                 | 254µs            | 0.89ms      | 3.16ms      |
+
+These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
+3.2.26 and Go 1.27.3 on an otherwise idle Ubuntu 24.04 VM with 4 vCPUs of an
+Intel Xeon E5-2618L v3.
+
+On a laptop:
 
 | JWT               | Method | Verification cache | Time per request | P50 latency | P99 latency |
 |-------------------|--------|--------------------|------------------|-------------|-------------|
@@ -180,8 +198,13 @@ process:
 | Invalid signature | SPOA   | On                 | 119µs            | 1.37ms      | 3.11ms      |
 
 These are the medians of 10 runs, measured on 2 November 2026 with HAProxy
-3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. Time per request is
-from requests sent 12 at a time, so the latencies include time spent queued.
+3.2.26 and Go 1.27.3 on a 12 thread Intel Core i5-1335U. The laptop lowers
+its clock speed under sustained load, so its figures vary more between runs,
+especially for invalid signatures.
+
+How much the SPOA costs compared with native verification depends heavily on
+the hardware: about 2.1× on the VM and 4.5× on the laptop with the
+verification cache off, and about 1.4× and 2.1× with it on.
 
 Every request in a run sends the same JWT, so the rows with the verification
 cache on are the best case. In practice the benefit depends on how many
