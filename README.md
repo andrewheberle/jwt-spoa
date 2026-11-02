@@ -13,7 +13,7 @@ docker run \
     -e JWT_JWT_ISS="http://idp.example.com" \
 	-e JWT_JWT_AUD="expected-jwt-aud" \
     -p 3000:3000 \
-	ghcr.io/andrewheberle/jwt-spoa:v0.3.1 # x-release-please-version
+	ghcr.io/andrewheberle/jwt-spoa:v0.4.0 # x-release-please-version
 ```
 
 ## HAProxy Integration
