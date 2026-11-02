@@ -27,3 +27,7 @@ _Avoid_: reload, rotate, sync
 **Native verification**:
 Checking a JWT inside HAProxy using only its `jwt_header_query`, `jwt_payload_query` and `jwt_verify` converters, with no SPOA.
 _Avoid_: native fetches, builtin, built-in JWT handling
+
+**Verification cache**:
+Remembered results of JWT verification for JWTs that passed, so a repeat request with the same JWT returns the same claim values without verifying again. An entry never outlives the JWT's `exp`, or `jwt.cache-max-age`.
+_Avoid_: token cache, JWT cache, claims cache
