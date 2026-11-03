@@ -1,5 +1,7 @@
 # jwt-spoa
 
+[![tag](https://img.shields.io/github/v/tag/andrewheberle/jwt-spoa)](https://github.com/andrewheberle/jwt-spoa/-/tags)
+[![GitHub License](https://img.shields.io/github/license/andrewheberle/jwt-spoa)](https://github.com/andrewheberle/jwt-spoa/-/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/andrewheberle/jwt-spoa/graph/badge.svg?token=XXsp17Pn5L)](https://codecov.io/gh/andrewheberle/jwt-spoa)
 
 This is a Stream Processing Offload Agent (SPOA) for use with HAProxy to
