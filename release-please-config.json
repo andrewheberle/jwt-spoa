@@ -9,7 +9,8 @@
   "packages": {
     ".": {
       "extra-files": [
-        "README.md"
+        "README.md",
+				"example/docker-compose.yml"
       ]
     }
   }
