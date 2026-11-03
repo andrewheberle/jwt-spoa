@@ -10,7 +10,7 @@
     ".": {
       "extra-files": [
         "README.md",
-				"example/docker-compose.yml"
+        "example/docker-compose.yml"
       ]
     }
   }
