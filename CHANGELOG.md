@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/andrewheberle/jwt-spoa/compare/v0.4.0...v0.4.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update cgr.dev/chainguard/static:latest docker digest to 8658e9e ([#65](https://github.com/andrewheberle/jwt-spoa/issues/65)) ([077ded5](https://github.com/andrewheberle/jwt-spoa/commit/077ded5c70c7a52f62b7e6f496fd3512352426c1))
+
 ## [0.4.0](https://github.com/andrewheberle/jwt-spoa/compare/v0.3.1...v0.4.0) (2026-11-02)
 
 
